@@ -1,0 +1,62 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" "cmdline-tools;latest"
+
+      - name: Install Godot and export templates
+        run: |
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates"
+          mkdir -p "$TEMPLATE_DIR"
+          unzip -q templates.tpz -d "$TEMPLATE_DIR"
+          mv "$TEMPLATE_DIR/templates" "$TEMPLATE_DIR/${GODOT_VERSION}.stable"
+
+      - name: Configure Godot for Android
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' "$ANDROID_SDK_ROOT" "$JAVA_HOME" > "$HOME/.config/godot/editor_settings-${GODOT_VERSION}.tres"
+
+      - name: Create temporary build keystore
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/build.jks" -alias build -keyalg RSA -keysize 2048 -validity 1 -storepass buildpass -keypass buildpass -dname "CN=BattleRift CI"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/build.jks" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=build" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=buildpass" >> "$GITHUB_ENV"
+
+      - name: Export APK
+        run: |
+          mkdir -p build
+          godot --headless --import || true
+          godot --headless --export-release "Android" build/BattleRift.apk
+          test -f build/BattleRift.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: battlerift-apk
+          path: build/BattleRift.apk
+          if-no-files-found: error

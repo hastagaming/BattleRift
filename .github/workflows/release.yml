@@ -1,0 +1,55 @@
+name: Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (example: v0.1.0)"
+        required: true
+      run_id:
+        description: "Build run ID (empty = latest successful build)"
+        required: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_TAG: ${{ github.event.inputs.tag }}
+      INPUT_RUN_ID: ${{ github.event.inputs.run_id }}
+    steps:
+      - uses: android-actions/setup-android@v3
+
+      - name: Install build tools
+        run: sdkmanager "build-tools;34.0.0"
+
+      - name: Download APK from previous build
+        run: |
+          RUN_ID="$INPUT_RUN_ID"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          test -n "$RUN_ID"
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name battlerift-apk --dir input
+
+      - name: Sign APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          BT="$ANDROID_SDK_ROOT/build-tools/34.0.0"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          "$BT/zipalign" -p -f 4 input/BattleRift.apk aligned.apk
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "BattleRift-${INPUT_TAG}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "BattleRift-${INPUT_TAG}.apk"
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Publish release
+        run: |
+          gh release create "$INPUT_TAG" "BattleRift-${INPUT_TAG}.apk" --repo "$GITHUB_REPOSITORY" --title "BattleRift $INPUT_TAG" --generate-notes
