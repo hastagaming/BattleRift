@@ -13,6 +13,9 @@ var current_id: String = ""
 var _available: Array[String] = []
 var _cooldown: float = 0.0
 
+var _loadout: Array[String] = []
+var _pickups: Array[String] = []
+
 
 func _ready() -> void:
 	var equipped := "sword"
@@ -24,9 +27,34 @@ func _ready() -> void:
 
 
 func set_available(ids: Array[String]) -> void:
-	_available = []
+	_loadout = []
 	for id in ids:
-		if WeaponDb.has(id) and id not in _available:
+		if WeaponDb.has(id) and id not in _loadout:
+			_loadout.append(id)
+	_rebuild()
+
+
+func add_pickup(weapon_id: String) -> bool:
+	if not WeaponDb.has(weapon_id) or weapon_id in _available:
+		return false
+	_pickups.append(weapon_id)
+	_rebuild()
+	select(weapon_id)
+	return true
+
+
+func clear_pickups() -> void:
+	if _pickups.is_empty():
+		return
+	_pickups = []
+	_rebuild()
+
+
+func _rebuild() -> void:
+	_available = []
+	_available.append_array(_loadout)
+	for id in _pickups:
+		if id not in _available:
 			_available.append(id)
 	if _available.is_empty():
 		current_id = ""

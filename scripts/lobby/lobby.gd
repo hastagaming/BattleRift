@@ -202,6 +202,14 @@ func _build_ui() -> void:
 	_br_label = Label.new()
 	_br_label.add_theme_color_override("font_color", UiTheme.ACCENT)
 	row.add_child(_br_label)
+	var arena_button := Button.new()
+	arena_button.text = "Practice Arena"
+	arena_button.pressed.connect(_on_practice_pressed)
+	row.add_child(arena_button)
+	var room_button := Button.new()
+	room_button.text = "Custom Room"
+	room_button.pressed.connect(_on_room_pressed)
+	row.add_child(room_button)
 	var sign_out_button := Button.new()
 	sign_out_button.text = "Sign Out"
 	sign_out_button.pressed.connect(PlayerData.sign_out)
@@ -250,3 +258,12 @@ func _on_balance_changed(_currency: String, _balance: int) -> void:
 
 func _on_signed_out() -> void:
 	Router.go(Router.AUTH)
+
+
+func _on_practice_pressed() -> void:
+	MatchSession.config = MatchSession.practice()
+	Router.go(Router.MATCH)
+
+
+func _on_room_pressed() -> void:
+	Router.go(Router.ROOM)

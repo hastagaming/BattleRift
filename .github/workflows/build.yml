@@ -48,6 +48,11 @@ jobs:
           echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=build" >> "$GITHUB_ENV"
           echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=buildpass" >> "$GITHUB_ENV"
 
+      - name: Run logic tests
+        run: |
+          godot --headless --import || true
+          godot --headless -s res://scripts/tests/logic_tests.gd
+
       - name: Export APK
         run: |
           mkdir -p build

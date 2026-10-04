@@ -42,7 +42,9 @@ func sign_in_dev(display_name: String = "Rifter") -> Dictionary:
 		return {"ok": false, "error": "Developer account is only available in debug builds"}
 	if not PlayerData.sign_in("dev", "dev-local", display_name):
 		return {"ok": false, "error": "Could not open developer account"}
-	return {"ok": true, "error": ""}
+	for weapon_id in WeaponDb.ids():
+		PlayerData.grant_item("weapon", weapon_id)
+	  return {"ok": true, "error": ""}
 
 
 func sign_in_with(provider: String) -> Dictionary:

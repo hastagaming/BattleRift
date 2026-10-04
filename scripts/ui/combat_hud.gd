@@ -9,6 +9,7 @@ var _weapon_label: Label
 var _damage_label: Label
 var _editor: ControlEditor
 var _hud_was_visible: bool = false
+var _player_was_controllable: bool = true
 
 
 func _ready() -> void:
@@ -57,6 +58,7 @@ func _open_editor() -> void:
 		return
 	_hud_was_visible = touch_hud.visible
 	touch_hud.visible = false
+	_player_was_controllable = player.controllable
 	player.controllable = false
 	_editor = ControlEditor.new()
 	_editor.closed.connect(_on_editor_closed)

@@ -4,6 +4,7 @@ extends CharacterBody3D
 signal ragdoll_started
 signal ragdoll_ended
 signal damage_changed(percent: float)
+signal fell_out(attacker: Node)
 
 enum State { NORMAL, RAGDOLL }
 
@@ -20,6 +21,7 @@ const RAGDOLL_MIN_TIME := 1.0
 const RAGDOLL_MAX_TIME := 6.0
 const KILL_Y := -25.0
 const TURN_SPEED := 14.0
+const KILL_CREDIT_SECONDS := 6.0
 
 var state: State = State.NORMAL
 var controllable: bool = true
@@ -28,6 +30,8 @@ var model: CharacterModel
 var weapons: WeaponController
 var damage_percent: float = 0.0
 var guard_remaining: float = 0.0
+var auto_respawn: bool = true
+var last_attacker: Node
 
 var _shape_node: CollisionShape3D
 var _ragdoll: Ragdoll
@@ -35,6 +39,8 @@ var _ragdoll_time: float = 0.0
 var _dash_time: float = 0.0
 var _dash_cooldown: float = 0.0
 var _hitstun: float = 0.0
+var _last_hit_msec: int = -100000
+var _gravity_sources: Dictionary = {}
 
 
 func _ready() -> void:
@@ -77,11 +83,31 @@ func face(direction: Vector3) -> void:
 func apply_hit(hit: Dictionary) -> void:
 	if state != State.NORMAL:
 		return
+	var attacker: Variant = hit.get("attacker")
+	if attacker is PlayerController and attacker != self:
+		last_attacker = attacker as PlayerController
+		_last_hit_msec = Time.get_ticks_msec()
 	var guarding := guard_remaining > 0.0
 	var impulse := CombatResolver.victim_impulse(hit, damage_percent, guarding)
 	damage_percent += CombatResolver.victim_damage(hit, guarding)
 	damage_changed.emit(damage_percent)
 	apply_knockback(impulse)
+
+
+func respawn() -> void:
+	_dispose_ragdoll()
+	_set_state(State.NORMAL)
+	set_active(true)
+	global_position = spawn_point
+	velocity = Vector3.ZERO
+	_dash_time = 0.0
+	_hitstun = 0.0
+	guard_remaining = 0.0
+	damage_percent = 0.0
+	last_attacker = null
+	_gravity_sources.clear()
+	weapons.clear_pickups()
+	damage_changed.emit(0.0)
 
 
 func apply_knockback(impulse: Vector3) -> void:
@@ -100,18 +126,6 @@ func launch(boost: Vector3) -> void:
 	if state != State.NORMAL:
 		return
 	velocity = Vector3(velocity.x + boost.x, boost.y, velocity.z + boost.z)
-
-
-func respawn() -> void:
-	_dispose_ragdoll()
-	_set_state(State.NORMAL)
-	global_position = spawn_point
-	velocity = Vector3.ZERO
-	_dash_time = 0.0
-	_hitstun = 0.0
-	guard_remaining = 0.0
-	damage_percent = 0.0
-	damage_changed.emit(0.0)
 
 
 func _physics_process(delta: float) -> void:
@@ -140,7 +154,7 @@ func _physics_process(delta: float) -> void:
 	_update_facing(direction, delta)
 	model.animate(Vector2(velocity.x, velocity.z).length(), is_on_floor(), delta)
 	if global_position.y < KILL_Y:
-		respawn()
+		_fall_out()
 
 
 func _apply_movement(direction: Vector3, delta: float) -> void:
@@ -159,7 +173,7 @@ func _apply_movement(direction: Vector3, delta: float) -> void:
 		else:
 			velocity.y = 0.0
 	else:
-		velocity.y -= GRAVITY * delta
+		velocity.y -= GRAVITY * gravity_scale() * delta
 
 
 func _start_dash(direction: Vector3) -> void:
@@ -212,7 +226,7 @@ func _process_ragdoll(delta: float) -> void:
 	var torso := _ragdoll.torso_position()
 	global_position = torso - Vector3(0.0, CharacterModel.TORSO_Y, 0.0)
 	if torso.y < KILL_Y:
-		respawn()
+		_fall_out()
 		return
 	if _ragdoll_time >= RAGDOLL_MAX_TIME or (_ragdoll_time >= RAGDOLL_MIN_TIME and _ragdoll.is_settled()):
 		_dispose_ragdoll()
@@ -240,3 +254,52 @@ func _set_state(new_state: State) -> void:
 		model.visible = true
 		_shape_node.set_deferred("disabled", false)
 		ragdoll_ended.emit()
+
+
+func gravity_scale() -> float:
+	var factor := 1.0
+	for key in _gravity_sources:
+		factor *= float(_gravity_sources[key])
+	return factor
+
+
+func set_gravity_source(source_id: int, factor: float) -> void:
+	_gravity_sources[source_id] = factor
+
+
+func clear_gravity_source(source_id: int) -> void:
+	_gravity_sources.erase(source_id)
+
+
+func recent_attacker(window_seconds: float) -> Node:
+	if not is_instance_valid(last_attacker):
+		return null
+	if float(Time.get_ticks_msec() - _last_hit_msec) / 1000.0 > window_seconds:
+		return null
+	return last_attacker
+
+
+func set_active(active: bool) -> void:
+	set_physics_process(active)
+	weapons.enabled = active
+	controllable = active
+	model.visible = active and state == State.NORMAL
+	_shape_node.set_deferred("disabled", (not active) or state == State.RAGDOLL)
+	if not active:
+		model.stop_emote()
+		velocity = Vector3.ZERO
+		guard_remaining = 0.0
+
+
+func _fall_out() -> void:
+	var attacker := recent_attacker(KILL_CREDIT_SECONDS)
+	if auto_respawn:
+		respawn()
+		fell_out.emit(attacker)
+		return
+	_dispose_ragdoll()
+	_set_state(State.NORMAL)
+	set_active(false)
+	global_position = spawn_point + Vector3(0.0, 8.0, 0.0)
+	velocity = Vector3.ZERO
+	fell_out.emit(attacker)

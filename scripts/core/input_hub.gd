@@ -13,6 +13,8 @@ const ACTIONS := {
 	"pet_ability": [KEY_R],
 	"weapon_switch": [KEY_TAB],
 	"emote": [KEY_E],
+	"spectate_prev": [KEY_COMMA],
+	"spectate_next": [KEY_PERIOD],
 }
 
 var look_delta: Vector2 = Vector2.ZERO

@@ -3,6 +3,8 @@ extends Node
 const BOOT := "res://scenes/boot/boot.tscn"
 const AUTH := "res://scenes/auth/auth.tscn"
 const LOBBY := "res://scenes/lobby/lobby.tscn"
+const MATCH := "res://scenes/match/match.tscn"
+const ROOM := "res://scenes/room/room.tscn"
 
 
 func go(path: String) -> void:

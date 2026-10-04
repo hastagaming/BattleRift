@@ -52,7 +52,7 @@ func validate_team_assignment(teams: Dictionary, player_count: int) -> Dictionar
 	return {"ok": true, "error": ""}
 
 
-func can_start_match(players: Dictionary, teams: Dictionary, player_count: int, host_id: int) -> Dictionary:
+func can_start_match(players: Dictionary, teams: Dictionary, player_count: int, host_id: Variant) -> Dictionary:
 	if players.size() != player_count:
 		return {"ok": false, "error": "Waiting for players"}
 	if not players.has(host_id):
