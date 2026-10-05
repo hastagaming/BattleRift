@@ -3,6 +3,7 @@ extends Control
 
 var result: Dictionary = {}
 var local_peer: int = 0
+var on_back: Callable = Callable()
 
 
 func _ready() -> void:
@@ -34,22 +35,29 @@ func _ready() -> void:
 	column.add_child(summary)
 	var scores: Dictionary = result.get("scores", {})
 	if String(result.get("mode", "")) != MatchState.MODE_PRACTICE and not scores.is_empty():
-		var parts: Array[String] = []
-		for team in scores:
-			parts.append("%s %d" % [String(team), int(scores[team])])
-		var score_label := Label.new()
-		score_label.text = "   ".join(parts)
-		score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		score_label.add_theme_font_size_override("font_size", 28)
-		column.add_child(score_label)
+	var parts: Array[String] = []
+	for team in scores:
+	parts.append("%s %d" % [String(team), int(scores[team])])
+	var score_label := Label.new()
+	score_label.text = "   ".join(parts)
+	score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	score_label.add_theme_font_size_override("font_size", 28)
+	column.add_child(score_label)
 	column.add_child(_build_table())
 	var rewards: Dictionary = result.get("rewards", {})
 	if not rewards.is_empty():
-		column.add_child(_build_rewards(rewards))
+	column.add_child(_build_rewards(rewards))
+	var note := String(result.get("note", ""))
+	if not note.is_empty():
+		var note_label := Label.new()
+		note_label.text = note
+		note_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		note_label.add_theme_color_override("font_color", UiTheme.MUTED)
+		column.add_child(note_label)
 	var back := Button.new()
 	back.text = "Back to Lobby"
 	back.custom_minimum_size = Vector2(0.0, 56.0)
-	back.pressed.connect(func() -> void: Router.go(Router.LOBBY))
+	back.pressed.connect(_on_back_pressed)
 	column.add_child(back)
 
 
@@ -131,3 +139,10 @@ func _build_rewards(rewards: Dictionary) -> Label:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_color_override("font_color", UiTheme.GOLD)
 	return label
+
+
+func _on_back_pressed() -> void:
+	if on_back.is_valid():
+		on_back.call()
+	else:
+		Router.go(Router.LOBBY)

@@ -1,6 +1,8 @@
 class_name CombatHud
 extends Control
 
+signal editor_toggled(open: bool)
+
 var player: PlayerController
 var touch_hud: Control
 
@@ -28,11 +30,15 @@ func _ready() -> void:
 	controls_button.pressed.connect(_open_editor)
 	row.add_child(controls_button)
 	add_child(_panel)
-	player.weapons.weapon_changed.connect(_on_weapon_changed)
-	player.damage_changed.connect(_on_damage_changed)
 	get_viewport().size_changed.connect(_layout)
-	_on_weapon_changed(player.weapons.current_id)
-	_on_damage_changed(player.damage_percent)
+	if player != null:
+		player.weapons.weapon_changed.connect(show_weapon)
+		player.damage_changed.connect(set_damage)
+		show_weapon(player.weapons.current_id)
+		set_damage(player.damage_percent)
+	else:
+		show_weapon("")
+		set_damage(0.0)
 
 
 func _layout() -> void:
@@ -42,12 +48,12 @@ func _layout() -> void:
 	_panel.position = Vector2(area.end.x - panel_size.x - 12.0, area.position.y + 68.0)
 
 
-func _on_weapon_changed(weapon_id: String) -> void:
+func show_weapon(weapon_id: String) -> void:
 	_weapon_label.text = String(WeaponDb.get_weapon(weapon_id).get("name", "Unarmed"))
 	_layout.call_deferred()
 
 
-func _on_damage_changed(percent: float) -> void:
+func set_damage(percent: float) -> void:
 	_damage_label.text = "DMG %d%%" % roundi(percent)
 	_damage_label.add_theme_color_override("font_color", UiTheme.TEXT.lerp(UiTheme.DANGER, clampf(percent / 150.0, 0.0, 1.0)))
 	_layout.call_deferred()
@@ -58,14 +64,18 @@ func _open_editor() -> void:
 		return
 	_hud_was_visible = touch_hud.visible
 	touch_hud.visible = false
-	_player_was_controllable = player.controllable
-	player.controllable = false
+	if player != null:
+		_player_was_controllable = player.controllable
+		player.controllable = false
 	_editor = ControlEditor.new()
 	_editor.closed.connect(_on_editor_closed)
 	get_parent().add_child(_editor)
+	editor_toggled.emit(true)
 
 
 func _on_editor_closed() -> void:
 	_editor = null
 	touch_hud.visible = _hud_was_visible
-	player.controllable = true
+	if player != null:
+		player.controllable = _player_was_controllable
+	editor_toggled.emit(false)

@@ -5,6 +5,7 @@ signal ragdoll_started
 signal ragdoll_ended
 signal damage_changed(percent: float)
 signal fell_out(attacker: Node)
+signal emote_played(emote: String)
 
 enum State { NORMAL, RAGDOLL }
 
@@ -32,6 +33,10 @@ var damage_percent: float = 0.0
 var guard_remaining: float = 0.0
 var auto_respawn: bool = true
 var last_attacker: Node
+var remote_input: PlayerInput
+var peer_id: int = 0
+var emote_id: String = ""
+var is_active: bool = true
 
 var _shape_node: CollisionShape3D
 var _ragdoll: Ragdoll
@@ -41,6 +46,7 @@ var _dash_cooldown: float = 0.0
 var _hitstun: float = 0.0
 var _last_hit_msec: int = -100000
 var _gravity_sources: Dictionary = {}
+var _local_input := PlayerInput.new()
 
 
 func _ready() -> void:
@@ -62,14 +68,27 @@ func _ready() -> void:
 
 
 func _on_equipment_changed(_slot: String) -> void:
-	model.apply_equipped()
+	if remote_input == null:
+		model.apply_equipped()
+
+
+# Returns the input for this physics frame. A server-controlled player reads
+# validated network input; a local player reads the Input singleton.
+func frame_input() -> PlayerInput:
+	if remote_input != null:
+		return remote_input
+	var camera := get_viewport().get_camera_3d()
+	var yaw := 0.0
+	var pitch := -0.35
+	if camera != null:
+		yaw = camera.global_rotation.y
+		pitch = camera.global_rotation.x
+	_local_input.capture_local(yaw, pitch)
+	return _local_input
 
 
 func aim_direction() -> Vector3:
-	var camera := get_viewport().get_camera_3d()
-	if camera == null:
-		return -model.global_transform.basis.z
-	return -camera.global_transform.basis.z
+	return frame_input().aim_forward()
 
 
 func face(direction: Vector3) -> void:
@@ -78,6 +97,12 @@ func face(direction: Vector3) -> void:
 		return
 	flat = flat.normalized()
 	model.rotation.y = atan2(-flat.x, -flat.z)
+
+
+func ragdoll_transform() -> Transform3D:
+	if state == State.RAGDOLL and is_instance_valid(_ragdoll):
+		return _ragdoll.torso_transform()
+	return Transform3D.IDENTITY
 
 
 func apply_hit(hit: Dictionary) -> void:
@@ -92,22 +117,6 @@ func apply_hit(hit: Dictionary) -> void:
 	damage_percent += CombatResolver.victim_damage(hit, guarding)
 	damage_changed.emit(damage_percent)
 	apply_knockback(impulse)
-
-
-func respawn() -> void:
-	_dispose_ragdoll()
-	_set_state(State.NORMAL)
-	set_active(true)
-	global_position = spawn_point
-	velocity = Vector3.ZERO
-	_dash_time = 0.0
-	_hitstun = 0.0
-	guard_remaining = 0.0
-	damage_percent = 0.0
-	last_attacker = null
-	_gravity_sources.clear()
-	weapons.clear_pickups()
-	damage_changed.emit(0.0)
 
 
 func apply_knockback(impulse: Vector3) -> void:
@@ -128,28 +137,50 @@ func launch(boost: Vector3) -> void:
 	velocity = Vector3(velocity.x + boost.x, boost.y, velocity.z + boost.z)
 
 
+func respawn() -> void:
+	_dispose_ragdoll()
+	_set_state(State.NORMAL)
+	set_active(true)
+	global_position = spawn_point
+	velocity = Vector3.ZERO
+	_dash_time = 0.0
+	_hitstun = 0.0
+	guard_remaining = 0.0
+	damage_percent = 0.0
+	last_attacker = null
+	_gravity_sources.clear()
+	weapons.clear_pickups()
+	damage_changed.emit(0.0)
+
+
 func _physics_process(delta: float) -> void:
+	var frame := frame_input()
 	if state == State.RAGDOLL:
+		frame.clear_edges()
 		_process_ragdoll(delta)
 		return
 	_dash_cooldown = maxf(_dash_cooldown - delta, 0.0)
 	guard_remaining = maxf(guard_remaining - delta, 0.0)
 	_hitstun = maxf(_hitstun - delta, 0.0)
 	var input := Vector2.ZERO
+	var jump_pressed := false
 	if controllable:
-		input = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var direction := _camera_relative(input)
+		input = frame.move
+		jump_pressed = frame.take(PlayerInput.JUMP)
+	else:
+		frame.clear_edges()
+	var direction := _camera_relative(input, frame.yaw)
 	if input.length() > 0.1 and model.is_emoting():
 		model.stop_emote()
-	if controllable and Input.is_action_just_pressed("emote"):
+	if controllable and frame.take(PlayerInput.EMOTE):
 		_play_equipped_emote()
-	if controllable and Input.is_action_just_pressed("dash") and _dash_cooldown <= 0.0 and _hitstun <= 0.0:
+	if controllable and frame.take(PlayerInput.DASH) and _dash_cooldown <= 0.0 and _hitstun <= 0.0:
 		_start_dash(direction)
 	if _dash_time > 0.0:
 		_dash_time -= delta
 		velocity.y = 0.0
 	else:
-		_apply_movement(direction, delta)
+		_apply_movement(direction, delta, jump_pressed)
 	move_and_slide()
 	_update_facing(direction, delta)
 	model.animate(Vector2(velocity.x, velocity.z).length(), is_on_floor(), delta)
@@ -157,7 +188,7 @@ func _physics_process(delta: float) -> void:
 		_fall_out()
 
 
-func _apply_movement(direction: Vector3, delta: float) -> void:
+func _apply_movement(direction: Vector3, delta: float, jump_pressed: bool) -> void:
 	var accel := GROUND_ACCEL if is_on_floor() else AIR_ACCEL
 	var target := direction * WALK_SPEED
 	if _hitstun > 0.0:
@@ -168,7 +199,7 @@ func _apply_movement(direction: Vector3, delta: float) -> void:
 		velocity.x = move_toward(velocity.x, target.x, accel * delta)
 		velocity.z = move_toward(velocity.z, target.z, accel * delta)
 	if is_on_floor() and velocity.y <= 0.0:
-		if controllable and Input.is_action_just_pressed("jump"):
+		if jump_pressed:
 			velocity.y = JUMP_VELOCITY
 		else:
 			velocity.y = 0.0
@@ -195,20 +226,22 @@ func _update_facing(direction: Vector3, delta: float) -> void:
 	model.rotation.y = lerp_angle(model.rotation.y, target_yaw, clampf(TURN_SPEED * delta, 0.0, 1.0))
 
 
-func _camera_relative(input: Vector2) -> Vector3:
+func _camera_relative(input: Vector2, yaw: float) -> Vector3:
 	if input == Vector2.ZERO:
 		return Vector3.ZERO
-	var camera := get_viewport().get_camera_3d()
-	var yaw := camera.global_rotation.y if camera != null else 0.0
 	return Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, yaw)
 
 
 func _play_equipped_emote() -> void:
-	var emote_id := "wave"
-	if PlayerData.is_signed_in:
-		emote_id = String(PlayerData.data["equipped"].get("emote", ""))
-	if not emote_id.is_empty():
-		model.play_emote(emote_id)
+	var chosen := emote_id
+	if remote_input == null:
+		chosen = "wave"
+		if PlayerData.is_signed_in:
+			chosen = String(PlayerData.data["equipped"].get("emote", ""))
+	if chosen.is_empty():
+		return
+	if model.play_emote(chosen):
+		emote_played.emit(chosen)
 
 
 func _enter_ragdoll(total_velocity: Vector3) -> void:
@@ -280,6 +313,7 @@ func recent_attacker(window_seconds: float) -> Node:
 
 
 func set_active(active: bool) -> void:
+	is_active = active
 	set_physics_process(active)
 	weapons.enabled = active
 	controllable = active

@@ -73,7 +73,7 @@ func purchase(item: Dictionary) -> Dictionary:
 func _purchase_remote(item_id: String) -> Dictionary:
 	if item_id.is_empty():
 		return {"ok": false, "error": "Invalid item"}
-	var result: Dictionary = await Supabase.rpc("purchase_item", {"p_item_id": item_id})
+	var result: Dictionary = await Supabase.call_rpc("purchase_item", {"p_item_id": item_id})
 	if not bool(result["ok"]):
 		return {"ok": false, "error": String(result["error"])}
 	if not result["body"] is Dictionary:

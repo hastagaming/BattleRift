@@ -118,7 +118,7 @@ func sign_in_remote(display_name: String) -> Dictionary:
 	var player_name := display_name.strip_edges()
 	if player_name.is_empty():
 		player_name = Supabase.user_display_name
-	var result: Dictionary = await Supabase.rpc("ensure_player", {"p_name": player_name})
+	var result: Dictionary = await Supabase.call_rpc("ensure_player", {"p_name": player_name})
 	if not bool(result["ok"]):
 		return {"ok": false, "error": String(result["error"])}
 	if not result["body"] is Dictionary:
@@ -147,7 +147,7 @@ func apply_remote_snapshot(body: Dictionary) -> void:
 func refresh_remote() -> bool:
 	if not is_signed_in or not remote:
 		return false
-	var result: Dictionary = await Supabase.rpc("get_player")
+	var result: Dictionary = await Supabase.call_rpc("get_player")
 	if not bool(result["ok"]) or not result["body"] is Dictionary:
 		return false
 	apply_remote_snapshot(result["body"])
@@ -181,7 +181,7 @@ func save() -> bool:
 
 
 func _sync(function_name: String, args: Dictionary) -> void:
-	var result: Dictionary = await Supabase.rpc(function_name, args)
+	var result: Dictionary = await Supabase.call_rpc(function_name, args)
 	if bool(result["ok"]):
 		return
 	push_warning("Server rejected %s: %s" % [function_name, result["error"]])
@@ -193,7 +193,7 @@ func _flush_settings() -> void:
 	var pending := _pending_settings
 	_pending_settings = {}
 	for key in pending:
-		var result: Dictionary = await Supabase.rpc("set_setting", {"p_key": key, "p_value": pending[key]})
+		var result: Dictionary = await Supabase.call_rpc("set_setting", {"p_key": key, "p_value": pending[key]})
 		if not bool(result["ok"]):
 			push_warning("Could not sync setting %s: %s" % [key, result["error"]])
 

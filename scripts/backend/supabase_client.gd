@@ -154,7 +154,7 @@ func request(method: int, path: String, payload: Variant = null) -> Dictionary:
 	return result
 
 
-func rpc(function_name: String, args: Dictionary = {}) -> Dictionary:
+func call_rpc(function_name: String, args: Dictionary = {}) -> Dictionary:
 	return await request(HTTPClient.METHOD_POST, "/rest/v1/rpc/%s" % function_name, args)
 
 

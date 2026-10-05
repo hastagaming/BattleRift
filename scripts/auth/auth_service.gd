@@ -44,7 +44,11 @@ func sign_in_dev(display_name: String = "Rifter") -> Dictionary:
 		return {"ok": false, "error": "Could not open developer account"}
 	for weapon_id in WeaponDb.ids():
 		PlayerData.grant_item("weapon", weapon_id)
-	  return {"ok": true, "error": ""}
+		if Economy.balance(Economy.CR) < 1000:
+		Economy.credit_cr(5000, "developer account")
+	if Economy.balance(Economy.BR) < 100:
+		Economy.apply_server_br_grant(500, "dev-%d" % Time.get_ticks_msec())
+	return {"ok": true, "error": ""}
 
 
 func sign_in_with(provider: String) -> Dictionary:

@@ -68,7 +68,7 @@ func start_check() -> Dictionary:
 
 
 func refresh() -> bool:
-	var result: Dictionary = await Supabase.rpc("get_my_room")
+	var result: Dictionary = await Supabase.call_rpc("get_my_room")
 	if not bool(result["ok"]):
 		failed.emit(String(result["error"]))
 		return false
@@ -77,7 +77,7 @@ func refresh() -> bool:
 
 
 func call_room(function_name: String, args: Dictionary = {}) -> bool:
-	var result: Dictionary = await Supabase.rpc(function_name, args)
+	var result: Dictionary = await Supabase.call_rpc(function_name, args)
 	if not bool(result["ok"]):
 		failed.emit(String(result["error"]))
 		return false
@@ -86,7 +86,7 @@ func call_room(function_name: String, args: Dictionary = {}) -> bool:
 
 
 func list_public() -> Array:
-	var result: Dictionary = await Supabase.rpc("list_public_rooms")
+	var result: Dictionary = await Supabase.call_rpc("list_public_rooms")
 	if not bool(result["ok"]):
 		failed.emit(String(result["error"]))
 		return []

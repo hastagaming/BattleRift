@@ -86,3 +86,11 @@ func _reset() -> void:
 	freeze = false
 	visible = true
 	_collider.disabled = false
+
+
+func net_flag() -> float:
+	return 0.0 if _exploding else 1.0
+
+
+func net_apply(flag: float, _extra: float) -> void:
+	visible = flag > 0.5

@@ -18,6 +18,7 @@ var _capacity: int = 2
 var _public_room: bool = false
 var _join_input: LineEdit
 var _public_list: VBoxContainer
+var _launching: bool = false
 
 
 func _ready() -> void:
@@ -303,7 +304,8 @@ func _show_room() -> void:
 		teams.add_child(_team_panel(team, room, capacity, started, is_host, me))
 	_body.add_child(teams)
 	if started:
-		_body.add_child(_label("ROOM LOCKED. WAITING FOR THE MATCH SERVER.", 22, UiTheme.GOLD))
+		_body.add_child(_label("MATCH STARTING. CONNECTING TO THE MATCH SERVER...", 22, UiTheme.GOLD))
+		_launch_match()
 		return
 	var my_ready := bool(me.get("ready", false))
 	_body.add_child(_button("Cancel Ready" if my_ready else "Ready", _act.bind("set_ready", {"p_ready": not my_ready}), 56.0))
@@ -379,3 +381,12 @@ func _style_start(button: Button, enabled: bool) -> void:
 	var text_color := UiTheme.BG if enabled else UiTheme.MUTED
 	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_disabled_color"]:
 		button.add_theme_color_override(color_name, text_color)
+
+
+func _launch_match() -> void:
+	if _launching:
+		return
+	_launching = true
+	_client.stop_polling()
+	NetSession.dev = false
+	Router.go(Router.ONLINE_MATCH)

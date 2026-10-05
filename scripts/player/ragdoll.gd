@@ -21,6 +21,10 @@ func torso_position() -> Vector3:
 	return _torso.global_position
 
 
+func torso_transform() -> Transform3D:
+	return _torso.global_transform
+
+
 func is_settled() -> bool:
 	return _torso.linear_velocity.length() < 0.5 and _torso.angular_velocity.length() < 1.0
 

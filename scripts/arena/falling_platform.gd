@@ -102,3 +102,16 @@ func _restore() -> void:
 	_trigger.set_deferred("monitoring", true)
 	_set_tint(_color)
 	_phase = Phase.IDLE
+
+
+func net_flag() -> float:
+	return 0.0 if _phase == Phase.GONE else 1.0
+
+
+func net_extra() -> float:
+	return 1.0 if _phase == Phase.SHAKING else 0.0
+
+
+func net_apply(flag: float, extra: float) -> void:
+	visible = flag > 0.5
+	_set_tint(WARNING_COLOR if extra > 0.5 else _color)

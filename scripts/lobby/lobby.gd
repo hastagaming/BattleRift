@@ -10,6 +10,7 @@ var _name_label: Label
 var _rank_label: Label
 var _cr_label: Label
 var _br_label: Label
+var _menu_bar: PanelContainer
 
 
 func _ready() -> void:
@@ -210,11 +211,27 @@ func _build_ui() -> void:
 	room_button.text = "Custom Room"
 	room_button.pressed.connect(_on_room_pressed)
 	row.add_child(room_button)
+	if OS.is_debug_build():
+		var dev_match_button := Button.new()
+		dev_match_button.text = "Dev Match"
+		dev_match_button.pressed.connect(_on_dev_match_pressed)
+		row.add_child(dev_match_button)
 	var sign_out_button := Button.new()
 	sign_out_button.text = "Sign Out"
 	sign_out_button.pressed.connect(PlayerData.sign_out)
 	row.add_child(sign_out_button)
 	layer.add_child(_top_bar)
+		_menu_bar = PanelContainer.new()
+	var menu_row := HBoxContainer.new()
+	menu_row.add_theme_constant_override("separation", 10)
+	_menu_bar.add_child(menu_row)
+	for entry in [["Shop", Router.SHOP], ["Inventory", Router.INVENTORY], ["Customize", Router.CUSTOMIZE], ["Profile", Router.PROFILE]]:
+		var menu_button := Button.new()
+		menu_button.text = String(entry[0])
+		menu_button.custom_minimum_size = Vector2(120.0, 52.0)
+		menu_button.pressed.connect(Router.go.bind(String(entry[1])))
+		menu_row.add_child(menu_button)
+	layer.add_child(_menu_bar)
 	var combat_hud := CombatHud.new()
 	  combat_hud.player = _player
 	  combat_hud.touch_hud = hud
@@ -227,6 +244,10 @@ func _layout_ui() -> void:
 	var area := ControlLayout.get_safe_area_rect(get_viewport())
 	_top_bar.position = area.position + Vector2(12.0, 8.0)
 	_top_bar.size = Vector2(area.size.x - 24.0, 0.0)
+	if _menu_bar != null:
+		var menu_size := _menu_bar.get_combined_minimum_size()
+		_menu_bar.size = menu_size
+		_menu_bar.position = Vector2(area.position.x + (area.size.x - menu_size.x) * 0.5, area.end.y - menu_size.y - 12.0)
 
 
 func _best_rank_text() -> String:
@@ -267,3 +288,8 @@ func _on_practice_pressed() -> void:
 
 func _on_room_pressed() -> void:
 	Router.go(Router.ROOM)
+
+
+func _on_dev_match_pressed() -> void:
+	NetSession.dev = true
+	Router.go(Router.ONLINE_MATCH)

@@ -5,16 +5,17 @@ signal weapon_changed(weapon_id: String)
 signal attacked(weapon_id: String)
 
 const AIM_DISTANCE := 60.0
+const CAMERA_HEIGHT := 1.4
+const CAMERA_DISTANCE := 5.5
 
 var owner_body: PlayerController
 var enabled: bool = true
 var current_id: String = ""
 
 var _available: Array[String] = []
-var _cooldown: float = 0.0
-
 var _loadout: Array[String] = []
 var _pickups: Array[String] = []
+var _cooldown: float = 0.0
 
 
 func _ready() -> void:
@@ -85,11 +86,12 @@ func _physics_process(delta: float) -> void:
 		return
 	if owner_body.state != PlayerController.State.NORMAL or not owner_body.controllable:
 		return
-	if Input.is_action_just_pressed("weapon_switch"):
+	var frame := owner_body.frame_input()
+	if frame.take(PlayerInput.SWITCH):
 		cycle()
 		return
 	var weapon := WeaponDb.get_weapon(current_id)
-	var wants_attack := Input.is_action_pressed("attack") if bool(weapon["auto"]) else Input.is_action_just_pressed("attack")
+	var wants_attack := frame.attack_held if bool(weapon["auto"]) else frame.take(PlayerInput.ATTACK)
 	if wants_attack and _cooldown <= 0.0:
 		_attack(weapon)
 
@@ -105,7 +107,7 @@ func _attack(weapon: Dictionary) -> void:
 	attacked.emit(weapon_id)
 	if windup > 0.0:
 		await get_tree().create_timer(windup).timeout
-		if owner_body.state != PlayerController.State.NORMAL or current_id != weapon_id:
+		if not is_instance_valid(owner_body) or owner_body.state != PlayerController.State.NORMAL or current_id != weapon_id:
 			return
 	match String(weapon["kind"]):
 		WeaponDb.KIND_MELEE:
@@ -126,11 +128,9 @@ func _muzzle_origin() -> Vector3:
 
 
 func _aim_direction(origin: Vector3) -> Vector3:
-	var camera := owner_body.get_viewport().get_camera_3d()
-	if camera == null:
-		return -owner_body.model.global_transform.basis.z
-	var from := camera.global_position
-	var forward := -camera.global_transform.basis.z
+	var basis := owner_body.frame_input().aim_basis()
+	var forward := basis * Vector3.FORWARD
+	var from := owner_body.global_position + Vector3(0.0, CAMERA_HEIGHT, 0.0) + basis * Vector3(0.0, 0.0, CAMERA_DISTANCE)
 	var to := from + forward * AIM_DISTANCE
 	var query := PhysicsRayQueryParameters3D.create(from, to, PhysicsLayers.WORLD | PhysicsLayers.HITTABLE, _exclude())
 	var hit := owner_body.get_world_3d().direct_space_state.intersect_ray(query)
@@ -204,32 +204,8 @@ func _fire_hitscan(weapon: Dictionary, weapon_id: String) -> void:
 		var target := CombatResolver.resolve_target(result["collider"] as Node)
 		if target != null and target != owner_body:
 			CombatResolver.deliver(target, CombatResolver.make_hit(weapon, weapon_id, direction, owner_body))
-	_spawn_beam(origin + direction * 0.6, end, weapon["color"])
-
-
-func _spawn_beam(from: Vector3, to: Vector3, color: Color) -> void:
-	var length := from.distance_to(to)
-	if length < 0.05:
-		return
-	var pivot := Node3D.new()
-	owner_body.get_parent().add_child(pivot)
-	var axis := (to - from).normalized()
-	var up := Vector3.UP if absf(axis.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
-	pivot.look_at_from_position(from, to, up)
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.03
-	mesh.bottom_radius = 0.03
-	mesh.height = length
-	var beam := MeshInstance3D.new()
-	beam.mesh = mesh
-	beam.material_override = material
-	beam.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-	beam.position = Vector3(0.0, 0.0, -length * 0.5)
-	pivot.add_child(beam)
-	var tween := pivot.create_tween()
-	tween.tween_property(material, "albedo_color:a", 0.0, 0.12)
-	tween.tween_callback(pivot.queue_free)
+	var from := origin + direction * 0.6
+	var color: Color = weapon["color"]
+	NetBus.emit_beam(owner_body, from, end, color)
+	if not NetBus.headless:
+		NetEffects.beam(owner_body.get_parent(), from, end, color)

@@ -14,6 +14,11 @@ func _initialize() -> void:
 	_test_spectator_candidates()
 	_test_spectator_cycle()
 	_test_room_start_rules()
+	_test_input_validation()
+	_test_snapshot_codec()
+	_test_snapshot_buffer()
+	_test_reward_rules()
+	_test_item_db()
 	print("Finished with %d failure(s)" % _failures)
 	quit(1 if _failures > 0 else 0)
 
@@ -160,3 +165,96 @@ func _test_room_start_rules() -> void:
 	_check(config.is_valid_custom_room_size(2) and config.is_valid_custom_room_size(4) and config.is_valid_custom_room_size(6), "room sizes 2, 4 and 6 are valid")
 	_check(not config.is_valid_custom_room_size(3) and not config.is_valid_custom_room_size(5), "room sizes 3 and 5 are rejected")
 	config.free()
+
+
+func _test_input_validation() -> void:
+	var input := PlayerInput.new()
+	_check(not input.apply_state(Vector2(NAN, 0.0), 0.0, 0.0, false), "non finite movement is rejected")
+	_check(not input.apply_state(Vector2.ZERO, INF, 0.0, false), "non finite yaw is rejected")
+	_check(input.apply_state(Vector2(5.0, 0.0), 0.0, 9.0, true), "a valid state is accepted")
+	_check(input.move.length() <= 1.0001, "movement vector is clamped to unit length")
+	_check(absf(input.pitch) <= PlayerInput.MAX_PITCH + 0.0001, "pitch is clamped")
+	_check(PlayerInput.is_single_action(4), "a single known action is accepted")
+	_check(not PlayerInput.is_single_action(6) and not PlayerInput.is_single_action(0) and not PlayerInput.is_single_action(32), "combined or unknown actions are rejected")
+	input.press(PlayerInput.JUMP)
+	_check(input.take(PlayerInput.JUMP) and not input.take(PlayerInput.JUMP), "an action edge is consumed once")
+
+
+func _test_snapshot_codec() -> void:
+	var players := PackedFloat32Array()
+	SnapshotCodec.append_player(players, 3, Vector3(1.0, 2.0, 3.0), 0.5, 4.0, SnapshotCodec.FLAG_ACTIVE | SnapshotCodec.FLAG_GROUNDED, 42.0, 2, Transform3D.IDENTITY)
+	_check(players.size() == SnapshotCodec.PLAYER_STRIDE, "player record has the expected size")
+	var record := SnapshotCodec.read_player(players, 0)
+	_check(int(record["slot"]) == 3 and int(record["weapon"]) == 2, "player slot and weapon survive a round trip")
+	var position: Vector3 = record["pos"]
+	_check(position.is_equal_approx(Vector3(1.0, 2.0, 3.0)), "player position survives a round trip")
+	_check((int(record["flags"]) & SnapshotCodec.FLAG_ACTIVE) != 0, "player flags survive a round trip")
+	var dynamics := PackedFloat32Array()
+	SnapshotCodec.append_dynamic(dynamics, 1.0, Transform3D(Basis(Vector3.UP, 0.7), Vector3(4.0, 5.0, 6.0)), 0.0)
+	var dynamic_record := SnapshotCodec.read_dynamic(dynamics, 0)
+	var dynamic_position: Vector3 = dynamic_record["pos"]
+	_check(dynamic_position.is_equal_approx(Vector3(4.0, 5.0, 6.0)), "dynamic position survives a round trip")
+	var dynamic_transform: Transform3D = dynamic_record["xform"]
+	_check(absf(dynamic_transform.basis.get_euler().y - 0.7) < 0.001, "dynamic rotation survives a round trip")
+	var projectiles := PackedFloat32Array()
+	SnapshotCodec.append_projectile(projectiles, 77, 5, Vector3(1.0, 1.0, 1.0), Vector3(0.0, 0.0, -10.0))
+	var projectile_record := SnapshotCodec.read_projectile(projectiles, 0)
+	_check(int(projectile_record["id"]) == 77 and int(projectile_record["kind"]) == 5, "projectile id and kind survive a round trip")
+
+
+func _snapshot(t: float, x: float, flags: int) -> Dictionary:
+	var players := PackedFloat32Array()
+	SnapshotCodec.append_player(players, 1, Vector3(x, 0.0, 0.0), 0.0, 0.0, flags, 0.0, -1, Transform3D.IDENTITY)
+	return {"t": t, "c": 0.0, "p": players, "d": PackedFloat32Array(), "j": PackedFloat32Array()}
+
+
+func _test_snapshot_buffer() -> void:
+	var buffer := SnapshotBuffer.new()
+	buffer.push(_snapshot(1.0, 0.0, SnapshotCodec.FLAG_ACTIVE), 1.0)
+	buffer.push(_snapshot(2.0, 10.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
+	var middle := buffer.sample(1.5 + SnapshotBuffer.INTERP_DELAY)
+	var middle_record := SnapshotCodec.read_player(middle["p"], 0)
+	var middle_position: Vector3 = middle_record["pos"]
+	_check(absf(middle_position.x - 5.0) < 0.01, "positions are interpolated between two snapshots")
+	var teleport_buffer := SnapshotBuffer.new()
+	teleport_buffer.push(_snapshot(1.0, 0.0, 0), 1.0)
+	teleport_buffer.push(_snapshot(2.0, 10.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
+	var jump := teleport_buffer.sample(1.5 + SnapshotBuffer.INTERP_DELAY)
+	var jump_record := SnapshotCodec.read_player(jump["p"], 0)
+	var jump_position: Vector3 = jump_record["pos"]
+	_check(absf(jump_position.x - 10.0) < 0.01, "an inactive player snaps instead of sliding across the arena")
+
+
+func _test_reward_rules() -> void:
+	var win := RewardRules.for_player("win", 2, false)
+	var draw := RewardRules.for_player("draw", 2, false)
+	var loss := RewardRules.for_player("loss", 2, false)
+	_check(int(win["cr"]) > int(draw["cr"]) and int(draw["cr"]) > int(loss["cr"]), "a win pays more than a draw, and a draw more than a loss")
+	_check(int(win["xp"]) > int(loss["xp"]), "a win gives more XP than a loss")
+	var quit_early := RewardRules.for_player("loss", 5, true)
+	_check(int(quit_early["cr"]) == 0 and int(quit_early["xp"]) == 0, "leaving a match early pays nothing")
+	var huge := RewardRules.for_player("win", 999, false)
+	_check(int(huge["cr"]) <= RewardRules.MAX_CR and int(huge["xp"]) <= RewardRules.MAX_XP, "rewards are capped")
+
+
+func _test_item_db() -> void:
+	var seen := {}
+	var all_valid := true
+	var unique := true
+	var premium_weapon := false
+	for entry in ItemDb.local_catalog():
+		var item_id := String(entry["id"])
+		if seen.has(item_id):
+			unique = false
+		seen[item_id] = true
+		if String(entry["category"]).is_empty() or int(entry["price"]) <= 0 or String(entry["currency"]) not in ["cr", "br"]:
+			all_valid = false
+		if String(entry["category"]) == "weapon" and String(entry["currency"]) == "br":
+			premium_weapon = true
+	_check(all_valid, "every catalog entry has a category, a price and a valid currency")
+	_check(unique, "catalog item ids are unique")
+	_check(not premium_weapon, "weapons cannot be bought with BR")
+	_check(ItemDb.slot_of("accessory", "crown") == "head" and ItemDb.slot_of("accessory", "cape") == "back", "accessories map to their slots")
+	_check(ItemDb.slot_of("skin", "frost") == "skin", "non accessory items use their category as the slot")
+	for starter in ["rifter", "default", "sword", "wave"]:
+		_check(not ItemDb.info(starter).is_empty(), "starter item %s has display data" % starter)

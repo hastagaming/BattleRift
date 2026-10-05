@@ -281,3 +281,26 @@ func _finish(winner_team: String, is_draw: bool, reason: String) -> void:
 	}
 	phase_changed.emit(phase)
 	match_ended.emit(last_result)
+
+
+func set_clock(value: float) -> void:
+	clock = value
+	_emit_clock()
+
+
+func apply_remote_state(data: Dictionary) -> void:
+	var incoming_scores: Dictionary = data.get("scores", scores)
+	var scores_differ := incoming_scores != scores
+	scores = incoming_scores.duplicate()
+	var incoming_participants: Dictionary = data.get("participants", participants)
+	participants = incoming_participants.duplicate(true)
+	clock = float(data.get("clock", clock))
+	_emit_clock()
+	if scores_differ:
+		scores_changed.emit(scores)
+	for peer_id in participants:
+		participant_changed.emit(peer_id)
+	var incoming_phase := int(data.get("phase", phase))
+	if incoming_phase != phase:
+		phase = incoming_phase
+		phase_changed.emit(phase)

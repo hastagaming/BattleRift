@@ -24,6 +24,9 @@ AuthService="*res://scripts/auth/auth_service.gd"
 supabase_url="https://eawopihlkzxpmgbhzuyc.supabase.co"
 supabase_anon_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhd29waWhsa3p4cG1nYmh6dXljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEwNjIzMjQsImV4cCI6MjEwNjYzODMyNH0.8RACuXrLipcxBTgonVTTH09cZ8XbxSdSOeqAy_0OrsQ"
 
+game_server_host="127.0.0.1"
+game_server_port=7777
+
 [display]
 
 window/size/viewport_width=1280

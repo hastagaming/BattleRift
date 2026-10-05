@@ -40,6 +40,11 @@ var _weapon_holder: Node3D
 var _phase: float = 0.0
 var _hold_offset: float = 0.0
 var _emoting: bool = false
+var _appearance_locked: bool = false
+
+const ACCESSORY_SLOTS: Array[String] = ["head", "face", "body", "back"]
+
+var _accessory_nodes: Dictionary = {}
 var _attacking: bool = false
 var _emote_tween: Tween
 var _attack_tween: Tween
@@ -97,16 +102,50 @@ func _limb(pivot_position: Vector3, size: Vector3, material: Material) -> Node3D
 
 
 func apply_equipped() -> void:
+	if _appearance_locked:
+		return
 	var skin_id := "default"
 	var character_id := "rifter"
+	var accessories := {}
 	if PlayerData.is_signed_in:
-		skin_id = String(PlayerData.data["equipped"].get("skin", "default"))
-		character_id = String(PlayerData.data["equipped"].get("character", "rifter"))
+		var equipped: Dictionary = PlayerData.data["equipped"]
+		skin_id = String(equipped.get("skin", "default"))
+		character_id = String(equipped.get("character", "rifter"))
+		for slot in ACCESSORY_SLOTS:
+			accessories[slot] = String(equipped.get(slot, ""))
+	_paint(skin_id, character_id)
+	_set_accessories(accessories)
+
+
+func apply_appearance(skin_id: String, character_id: String, accessories: Dictionary = {}) -> void:
+	_appearance_locked = true
+	_paint(skin_id, character_id)
+	_set_accessories(accessories)
+
+
+func _paint(skin_id: String, character_id: String) -> void:
 	skin_color = SKIN_COLORS.get(skin_id, SKIN_COLORS["default"])
 	accent_color = CHARACTER_ACCENTS.get(character_id, CHARACTER_ACCENTS["rifter"])
 	_skin_material.albedo_color = skin_color
 	_accent_material.albedo_color = accent_color
 	_pants_material.albedo_color = accent_color.darkened(0.55)
+
+
+func _set_accessories(items: Dictionary) -> void:
+	for slot in ACCESSORY_SLOTS:
+		var wanted := String(items.get(slot, ""))
+		var current: Node3D = _accessory_nodes.get(slot)
+		if current != null and String(current.get_meta("item_id", "")) == wanted:
+			continue
+		if current != null:
+			current.queue_free()
+			_accessory_nodes.erase(slot)
+		if wanted.is_empty():
+			continue
+		var node := AccessoryVisuals.build(wanted)
+		node.set_meta("item_id", wanted)
+		add_child(node)
+		_accessory_nodes[slot] = node
 
 
 func is_emoting() -> bool:

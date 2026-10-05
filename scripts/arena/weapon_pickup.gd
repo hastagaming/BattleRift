@@ -80,3 +80,11 @@ func _consume() -> void:
 	if is_inside_tree():
 		_active = true
 		_set_shown(true)
+
+
+func net_flag() -> float:
+	return 1.0 if _active else 0.0
+
+
+func net_apply(flag: float, _extra: float) -> void:
+	_set_shown(flag > 0.5)
