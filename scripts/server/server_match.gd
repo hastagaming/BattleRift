@@ -72,6 +72,7 @@ func _make_member(slot: int, user_id: String, display_name: String, team: String
 		"character": "rifter",
 		"emote": "wave",
 		"accessories": {},
+		"ratings": {},
 		"owned": [],
 		"equipped_weapon": "",
 		"weapon": "",
@@ -110,6 +111,7 @@ func add_peer(peer_id: int, identity: Dictionary) -> Dictionary:
 	member["character"] = String(identity["character"])
 	member["emote"] = String(identity["emote"])
 	member["accessories"] = identity["accessories"]
+	member["ratings"] = identity.get("ratings", {})
 	member["owned"] = identity["owned"]
 	member["equipped_weapon"] = String(identity["equipped_weapon"])
 	_peer_slot[peer_id] = slot
@@ -207,15 +209,20 @@ func _enter_weapons() -> void:
 	_send_state()
 
 
+func _spawn_index(slot: int, team: String, team_counts: Dictionary) -> int:
+	var count := int(team_counts.get(team, 0))
+	team_counts[team] = count + 1
+	var indices: Array = Arena.TEAM_SPAWNS.get(team, [])
+	if indices.is_empty():
+		return (slot - 1) % arena.spawn_points.size()
+	return int(indices[count % indices.size()]) % arena.spawn_points.size()
+
+
 func _spawn_bodies() -> void:
 	var team_counts := {}
 	for slot in _slots:
 		var member: Dictionary = _members[slot]
-		var team := String(member["team"])
-		var count := int(team_counts.get(team, 0))
-		team_counts[team] = count + 1
-		var indices: Array = Arena.TEAM_SPAWNS.get(team, [0])
-		var spawn_index := int(indices[count % indices.size()]) % arena.spawn_points.size()
+		var spawn_index := _spawn_index(slot, String(member["team"]), team_counts)
 		var body := PlayerController.new()
 		body.remote_input = PlayerInput.new()
 		body.peer_id = slot
@@ -512,36 +519,107 @@ func _send_snapshot() -> void:
 		hub.rpc_id(peer_id, "cl_snapshot", snapshot)
 
 
+func _outcome_for(slot: int, final_result: Dictionary) -> String:
+	if bool(final_result["draw"]):
+		return "draw"
+	var rows: Dictionary = final_result["participants"]
+	var row: Dictionary = rows.get(slot, {})
+	if String(row.get("team", "")) == String(final_result["winner_team"]):
+		return "win"
+	return "loss"
+
+
+func _average(values: Array) -> int:
+	if values.is_empty():
+		return RankSystem.DEFAULT_MMR
+	var total := 0
+	for value in values:
+		total += int(value)
+	return roundi(float(total) / float(values.size()))
+
+
+func _enemy_average(team_mmr: Dictionary, own_team: String) -> int:
+	var enemies: Array = []
+	for team in team_mmr:
+		if String(team) != own_team:
+			enemies.append_array(team_mmr[team])
+	if enemies.is_empty():
+		enemies = team_mmr.get(own_team, [])
+	return _average(enemies)
+
+
+# Rating changes only for ranked rooms. Casual and custom matches never touch the rating.
+func _compute_ratings(final_result: Dictionary) -> Dictionary:
+	var changes := {}
+	if not bool(room.get("ranked", false)):
+		return changes
+	var context := String(room.get("context", ""))
+	if not RankSystem.is_valid_context(context):
+		return changes
+	var rows: Dictionary = final_result["participants"]
+	var team_mmr := {}
+	var all_mmr: Array = []
+	for slot in _slots:
+		var member: Dictionary = _members[slot]
+		var ratings: Dictionary = member["ratings"]
+		var mmr := int(ratings.get(context, RankSystem.DEFAULT_MMR))
+		var team := String(member["team"])
+		if not team_mmr.has(team):
+			team_mmr[team] = []
+		team_mmr[team].append(mmr)
+		all_mmr.append(mmr)
+	for slot in _slots:
+		var member: Dictionary = _members[slot]
+		var ratings: Dictionary = (member["ratings"] as Dictionary).duplicate()
+		var change: Dictionary
+		if context == "battle_royal":
+			var row: Dictionary = rows.get(slot, {})
+			change = RankSystem.apply_placement_result(ratings, int(row.get("placement", _slots.size())), _slots.size(), _average(all_mmr))
+		else:
+			change = RankSystem.apply_team_result(ratings, context, _enemy_average(team_mmr, String(member["team"])), _outcome_for(slot, final_result))
+		if bool(change.get("ok", false)):
+			changes[slot] = change
+	return changes
+
+
 func _compute_rewards(final_result: Dictionary) -> Dictionary:
 	var rows: Dictionary = final_result["participants"]
+	var battle_royal := String(room.get("queue_type", "")) == "battle_royal"
 	var rewards := {}
 	for slot in _slots:
 		var row: Dictionary = rows.get(slot, {})
-		var outcome := "loss"
-		if bool(final_result["draw"]):
-			outcome = "draw"
-		elif String(row.get("team", "")) == String(final_result["winner_team"]):
-			outcome = "win"
-		var reward := RewardRules.for_player(outcome, int(row.get("kills", 0)), bool(row.get("forfeited", false)))
+		var kills := int(row.get("kills", 0))
+		var forfeited := bool(row.get("forfeited", false))
+		var outcome := _outcome_for(slot, final_result)
+		var reward: Dictionary
+		if battle_royal:
+			reward = RewardRules.for_placement(int(row.get("placement", _slots.size())), _slots.size(), kills, forfeited)
+		else:
+			reward = RewardRules.for_player(outcome, kills, forfeited)
 		reward["outcome"] = outcome
 		rewards[slot] = reward
 	return rewards
 
 
-func _persist(final_result: Dictionary, rewards: Dictionary) -> bool:
+func _persist(final_result: Dictionary, rewards: Dictionary, changes: Dictionary) -> bool:
 	var rows: Dictionary = final_result["participants"]
 	var entries: Array = []
 	for slot in _slots:
 		var row: Dictionary = rows.get(slot, {})
 		var reward: Dictionary = rewards[slot]
-		entries.append({
+		var entry := {
 			"user_id": String(_members[slot]["user_id"]),
 			"outcome": String(reward["outcome"]),
 			"kills": int(row.get("kills", 0)),
 			"deaths": int(row.get("deaths", 0)),
 			"cr": int(reward["cr"]),
 			"xp": int(reward["xp"]),
-		})
+			"duration": 0 if bool(row.get("forfeited", false)) else int(float(final_result.get("duration", 0.0))),
+		}
+		if changes.has(slot):
+			entry["rating_context"] = String(room.get("context", ""))
+			entry["new_mmr"] = int(changes[slot]["after"])
+		entries.append(entry)
 	var result: Dictionary = await admin.service_rpc("apply_match_result", {
 		"p_match_id": String(room["id"]),
 		"p_mode": String(final_result["mode"]),
@@ -556,10 +634,11 @@ func _on_ended(final_result: Dictionary) -> void:
 	stage = Stage.DONE
 	_stage_time = 0.0
 	var rewards := _compute_rewards(final_result)
+	var changes := _compute_ratings(final_result)
 	var persisted := false
 	var note := "Rewards are not saved for this match."
 	if persist:
-		persisted = await _persist(final_result, rewards)
+		persisted = await _persist(final_result, rewards, changes)
 		note = "" if persisted else "Rewards could not be saved."
 	if _closing:
 		return
@@ -570,8 +649,18 @@ func _on_ended(final_result: Dictionary) -> void:
 		var copy := final_result.duplicate(true)
 		copy["persisted"] = persisted
 		copy["note"] = note
+		copy["queue_type"] = String(room.get("queue_type", "custom"))
+		copy["ranked"] = bool(room.get("ranked", false))
 		if persisted:
-			copy["rewards"] = {"cr": int(rewards[slot]["cr"]), "xp": int(rewards[slot]["xp"])}
+			var shown := {"cr": int(rewards[slot]["cr"]), "xp": int(rewards[slot]["xp"])}
+			if changes.has(slot):
+				var change: Dictionary = changes[slot]
+				shown["rank_delta"] = int(change["delta"])
+				if bool(change["tier_changed"]):
+					shown["rank_tier"] = "%s > %s" % [String(change["tier_before"]), String(change["tier_after"])]
+				else:
+					shown["rank_tier"] = String(change["tier_after"])
+			copy["rewards"] = shown
 		hub.rpc_id(int(member["peer"]), "cl_result", copy)
 	_result_sent = true
 	_stage_time = 0.0

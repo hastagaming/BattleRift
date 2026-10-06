@@ -165,5 +165,11 @@ func _build_spawns() -> void:
 		Vector3(5.4, 0.1, -5.4),
 		Vector3(0.0, 0.1, 7.6),
 		Vector3(0.0, 0.1, -7.6),
+		Vector3(7.7, 0.1, 0.0),
+		Vector3(-7.7, 0.1, 0.0),
+		Vector3(2.8, 0.1, 2.8),
+		Vector3(-2.8, 0.1, 2.8),
+		Vector3(-2.8, 0.1, -2.8),
+		Vector3(2.8, 0.1, -2.8),
 	]:
 		spawn_points.append(at)

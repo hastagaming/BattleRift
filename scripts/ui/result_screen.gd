@@ -33,6 +33,13 @@ func _ready() -> void:
 	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	summary.add_theme_color_override("font_color", UiTheme.MUTED)
 	column.add_child(summary)
+	var place := int(_local_row().get("placement", 0))
+	if String(result.get("queue_type", "")) == "battle_royal" and place > 0:
+		var place_label := Label.new()
+		place_label.text = "Placement #%d of %d" % [place, (result.get("participants", {}) as Dictionary).size()]
+		place_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		place_label.add_theme_font_size_override("font_size", 26)
+		column.add_child(place_label)
 	var scores: Dictionary = result.get("scores", {})
 	if String(result.get("mode", "")) != MatchState.MODE_PRACTICE and not scores.is_empty():
 	var parts: Array[String] = []
@@ -109,20 +116,32 @@ func _cell(text: String, color: Color = UiTheme.TEXT) -> Label:
 
 
 func _build_table() -> GridContainer:
-	var grid := GridContainer.new()
-	grid.columns = 5
-	grid.add_theme_constant_override("h_separation", 16)
-	for header in ["Player", "Team", "Kills", "Deaths", "Stocks"]:
-		grid.add_child(_cell(header, UiTheme.MUTED))
 	var rows: Dictionary = result.get("participants", {})
-	for peer_id in rows:
+	var battle_royal := String(result.get("queue_type", "")) == "battle_royal"
+	var headers: Array[String] = ["Player", "Team", "Kills", "Deaths", "Stocks"]
+	if battle_royal:
+		headers = ["Place", "Player", "Kills", "Deaths"]
+	var grid := GridContainer.new()
+	grid.columns = headers.size()
+	grid.add_theme_constant_override("h_separation", 16)
+	for header in headers:
+		grid.add_child(_cell(header, UiTheme.MUTED))
+	var order: Array = rows.keys()
+	if battle_royal:
+		order.sort_custom(func(a: Variant, b: Variant) -> bool: return int(rows[a]["placement"]) < int(rows[b]["placement"]))
+	for peer_id in order:
 		var row: Dictionary = rows[peer_id]
 		var color := UiTheme.GOLD if int(peer_id) == local_peer else UiTheme.TEXT
-		grid.add_child(_cell(String(row["name"]), color))
-		grid.add_child(_cell(String(row["team"]), color))
+		if battle_royal:
+			grid.add_child(_cell("#%d" % int(row["placement"]), color))
+			grid.add_child(_cell(String(row["name"]), color))
+		else:
+			grid.add_child(_cell(String(row["name"]), color))
+			grid.add_child(_cell(String(row["team"]), color))
 		grid.add_child(_cell(str(int(row["kills"])), color))
 		grid.add_child(_cell(str(int(row["deaths"])), color))
-		grid.add_child(_cell(str(int(row["stocks"])), color))
+		if not battle_royal:
+			grid.add_child(_cell(str(int(row["stocks"])), color))
 	return grid
 
 
@@ -134,6 +153,8 @@ func _build_rewards(rewards: Dictionary) -> Label:
 		parts.append("XP +%d" % int(rewards["xp"]))
 	if rewards.has("rank_delta"):
 		parts.append("Rank %+d" % int(rewards["rank_delta"]))
+	if rewards.has("rank_tier"):
+		parts.append(String(rewards["rank_tier"]))
 	var label := Label.new()
 	label.text = "   ".join(parts)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

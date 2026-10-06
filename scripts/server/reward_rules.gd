@@ -12,6 +12,8 @@ const DRAW_XP := 15
 const KILL_XP := 5
 const MAX_XP := 200
 const MAX_COUNTED_KILLS := 20
+const PLACEMENT_CR := 4
+const PLACEMENT_XP := 3
 
 
 static func for_player(outcome: String, kills: int, forfeited: bool) -> Dictionary:
@@ -28,3 +30,13 @@ static func for_player(outcome: String, kills: int, forfeited: bool) -> Dictiona
 			cr += DRAW_CR
 			xp += DRAW_XP
 	return {"cr": mini(cr, MAX_CR), "xp": mini(xp, MAX_XP)}
+
+
+static func for_placement(placement: int, total: int, kills: int, forfeited: bool) -> Dictionary:
+	var reward := for_player("win" if placement == 1 else "loss", kills, forfeited)
+	if forfeited or total < 2:
+		return reward
+	var beaten := clampi(total - placement, 0, total)
+	reward["cr"] = mini(int(reward["cr"]) + beaten * PLACEMENT_CR, MAX_CR)
+	reward["xp"] = mini(int(reward["xp"]) + beaten * PLACEMENT_XP, MAX_XP)
+	return reward

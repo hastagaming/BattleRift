@@ -36,6 +36,7 @@ var _countdown_left: float = 0.0
 var _countdown_shown: int = -1
 var _clock_shown: int = -1
 var _elapsed: float = 0.0
+var _elimination_order: Array[int] = []
 
 
 func _process(delta: float) -> void:
@@ -55,6 +56,7 @@ func configure(config: Dictionary) -> Dictionary:
 	countdown_length = clampf(float(config.get("countdown", 3.0)), 0.5, 10.0)
 	participants.clear()
 	scores.clear()
+	_elimination_order.clear()
 	return {"ok": true, "error": ""}
 
 
@@ -181,6 +183,7 @@ func report_knockout(victim_id: int, attacker_id: int = -1) -> bool:
 	if mode == MODE_STOCK:
 		victim["stocks"] = int(victim["stocks"]) - 1
 	if mode == MODE_STOCK and int(victim["stocks"]) <= 0:
+		_elimination_order.append(victim_id)
 		victim["state"] = STATE_OUT
 		victim["respawn_in"] = 0.0
 	else:
@@ -199,6 +202,8 @@ func forfeit(peer_id: int) -> void:
 	if not participants.has(peer_id):
 		return
 	var entry: Dictionary = participants[peer_id]
+	if String(entry["state"]) != STATE_OUT:
+		_elimination_order.append(peer_id)
 	entry["state"] = STATE_OUT
 	entry["forfeited"] = true
 	entry["stocks"] = 0
@@ -254,10 +259,27 @@ func _finish_by_time() -> void:
 		_finish("", true, "time")
 
 
+func _compute_placements() -> Dictionary:
+	var placements := {}
+	var survivors: Array[int] = []
+	for peer_id in participants:
+		var entry: Dictionary = participants[peer_id]
+		if String(entry["state"]) != STATE_OUT:
+			survivors.append(int(peer_id))
+	for peer_id in survivors:
+		placements[peer_id] = 1
+	var next_place := survivors.size() + 1 if not survivors.is_empty() else 1
+	for i in range(_elimination_order.size() - 1, -1, -1):
+		placements[_elimination_order[i]] = next_place
+		next_place += 1
+	return placements
+
+
 func _finish(winner_team: String, is_draw: bool, reason: String) -> void:
 	if phase == Phase.ENDED:
 		return
 	phase = Phase.ENDED
+	var placements := _compute_placements()
 	var rows := {}
 	for peer_id in participants:
 		var entry: Dictionary = participants[peer_id]
@@ -268,6 +290,7 @@ func _finish(winner_team: String, is_draw: bool, reason: String) -> void:
 			"deaths": entry["deaths"],
 			"stocks": entry["stocks"],
 			"forfeited": entry["forfeited"],
+			"placement": int(placements.get(peer_id, 0)),
 		}
 	last_result = {
 		"mode": mode,
@@ -277,6 +300,7 @@ func _finish(winner_team: String, is_draw: bool, reason: String) -> void:
 		"duration": _elapsed,
 		"scores": scores.duplicate(),
 		"participants": rows,
+		"placements": placements,
 		"ranked": false,
 	}
 	phase_changed.emit(phase)

@@ -10,6 +10,9 @@ const SHOP := "res://scenes/shop/shop.tscn"
 const INVENTORY := "res://scenes/inventory/inventory.tscn"
 const CUSTOMIZE := "res://scenes/customize/customize.tscn"
 const PROFILE := "res://scenes/profile/profile.tscn"
+const PLAY := "res://scenes/play/play.tscn"
+const MISSIONS := "res://scenes/missions/missions.tscn"
+const SETTINGS := "res://scenes/settings/settings.tscn"
 
 
 func go(path: String) -> void:

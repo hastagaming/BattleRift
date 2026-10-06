@@ -54,7 +54,9 @@ func _ready() -> void:
 	add_child(_banner)
 	state.clock_changed.connect(_on_clock)
 	state.scores_changed.connect(func(_scores: Dictionary) -> void: _refresh_scores())
-	state.participant_changed.connect(func(_peer_id: int) -> void: _refresh_stocks())
+		state.participant_changed.connect(func(_peer_id: int) -> void:
+		_refresh_stocks()
+		_refresh_scores())
 	state.player_knocked_out.connect(_on_knockout)
 	get_viewport().size_changed.connect(_layout)
 	_on_clock(state.clock)
@@ -125,6 +127,12 @@ func _on_clock(seconds: float) -> void:
 func _refresh_scores() -> void:
 	if state.mode == MatchState.MODE_PRACTICE:
 		_score_label.text = "PRACTICE"
+	elif state.participants.size() > 2 and state.scores.size() == state.participants.size():
+		var left := 0
+		for peer_id in state.participants:
+			if String(state.participants[peer_id]["state"]) != MatchState.STATE_OUT:
+				left += 1
+		_score_label.text = "%d PLAYERS LEFT" % left
 	else:
 		var parts: Array[String] = []
 		for team in state.scores:

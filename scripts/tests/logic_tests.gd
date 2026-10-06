@@ -19,6 +19,9 @@ func _initialize() -> void:
 	_test_snapshot_buffer()
 	_test_reward_rules()
 	_test_item_db()
+	_test_rank_system()
+	_test_placements()
+	_test_placement_rewards()
 	print("Finished with %d failure(s)" % _failures)
 	quit(1 if _failures > 0 else 0)
 
@@ -258,3 +261,38 @@ func _test_item_db() -> void:
 	_check(ItemDb.slot_of("skin", "frost") == "skin", "non accessory items use their category as the slot")
 	for starter in ["rifter", "default", "sword", "wave"]:
 		_check(not ItemDb.info(starter).is_empty(), "starter item %s has display data" % starter)
+
+
+func _test_rank_system() -> void:
+	var rank: Node = load("res://scripts/rank/rank_system.gd").new()
+	_check(rank.tier_name_for_mmr(0) == "Bronze" and rank.tier_name_for_mmr(1300) == "Gold" and rank.tier_name_for_mmr(4000) == "Rift", "mmr maps to the right tier")
+	var win: Dictionary = rank.apply_team_result(rank.new_ratings(), "1v1", 800, "win")
+	_check(bool(win["ok"]) and int(win["delta"]) > 0, "winning an even match raises the rating")
+	var loss: Dictionary = rank.apply_team_result(rank.new_ratings(), "1v1", 800, "loss")
+	_check(int(loss["delta"]) < 0, "losing an even match lowers the rating")
+	var upset: Dictionary = rank.apply_team_result(rank.new_ratings(), "1v1", 1600, "win")
+	_check(int(upset["delta"]) > int(win["delta"]), "beating a stronger opponent gives more rating")
+	var first: Dictionary = rank.apply_placement_result(rank.new_ratings(), 1, 12, 800)
+	var last: Dictionary = rank.apply_placement_result(rank.new_ratings(), 12, 12, 800)
+	_check(int(first["delta"]) > 0 and int(last["delta"]) < 0, "battle royal first place gains and last place loses")
+	_check(not bool(rank.apply_team_result(rank.new_ratings(), "battle_royal", 800, "win")["ok"]), "a team result cannot change the battle royal rating")
+	rank.free()
+
+
+func _test_placements() -> void:
+	var state := _active_state({"mode": "stock", "stocks": 1, "countdown": 1.0, "respawn_delay": 1.0}, [[1, "One", "P1"], [2, "Two", "P2"], [3, "Three", "P3"]])
+	state.report_knockout(3, 1)
+	state.report_knockout(2, 1)
+	_check(state.phase == MatchState.Phase.ENDED, "free for all ends when one player is left")
+	var placements: Dictionary = state.last_result["placements"]
+	_check(int(placements[1]) == 1 and int(placements[2]) == 2 and int(placements[3]) == 3, "placements follow the elimination order")
+	_check(String(state.last_result["winner_team"]) == "P1", "the last player standing wins")
+	state.free()
+
+
+func _test_placement_rewards() -> void:
+	var first := RewardRules.for_placement(1, 12, 3, false)
+	var middle := RewardRules.for_placement(6, 12, 0, false)
+	var last := RewardRules.for_placement(12, 12, 0, false)
+	_check(int(first["cr"]) > int(middle["cr"]) and int(middle["cr"]) > int(last["cr"]), "better placements pay more")
+	_check(int(RewardRules.for_placement(1, 12, 0, true)["cr"]) == 0, "leaving early pays nothing in battle royal")

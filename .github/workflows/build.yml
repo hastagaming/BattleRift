@@ -32,11 +32,17 @@ jobs:
           MISSING=()
           [ -d "$SDK/platforms/android-34" ] || MISSING+=("platforms;android-34")
           [ -d "$SDK/build-tools/34.0.0" ] || MISSING+=("build-tools;34.0.0")
+          [ -d "$SDK/ndk/23.2.8568313" ] || MISSING+=("ndk;23.2.8568313")
+          [ -d "$SDK/cmake/3.10.2.4988404" ] || MISSING+=("cmake;3.10.2.4988404")
           if [ "${#MISSING[@]}" -gt 0 ]; then
             yes | sudo env "PATH=$PATH" "JAVA_HOME=$JAVA_HOME" "$TOOLS/latest/bin/sdkmanager" "${MISSING[@]}" || true
           fi
           test -d "$SDK/platforms/android-34"
           test -d "$SDK/build-tools/34.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
 
       - name: Install Godot and export templates
         run: |
@@ -66,6 +72,21 @@ jobs:
         run: |
           godot --headless --import || true
           godot --headless -s res://scripts/tests/logic_tests.gd
+
+      - name: Build and test the notification plugin
+        run: |
+          gradle --project-dir android-plugin --no-daemon test assembleDebug assembleRelease
+          mkdir -p addons/battlerift_notify/bin/debug addons/battlerift_notify/bin/release
+          cp android-plugin/battlerift-notify/build/outputs/aar/battlerift-notify-debug.aar addons/battlerift_notify/bin/debug/
+          cp android-plugin/battlerift-notify/build/outputs/aar/battlerift-notify-release.aar addons/battlerift_notify/bin/release/
+          test -f addons/battlerift_notify/bin/release/battlerift-notify-release.aar
+
+      - name: Install Android build template
+        run: |
+          mkdir -p android/build
+          unzip -q -o "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" -d android/build
+          touch android/build/.gdignore
+          printf '%s' "${GODOT_VERSION}.stable" > android/.build_version
 
       - name: Export APK
         run: |

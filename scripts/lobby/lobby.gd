@@ -32,6 +32,7 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_layout_ui)
 	_refresh_ui()
 	_layout_ui()
+	AppNotify.ask_once()
 
 
 func _build_environment() -> void:
@@ -225,7 +226,7 @@ func _build_ui() -> void:
 	var menu_row := HBoxContainer.new()
 	menu_row.add_theme_constant_override("separation", 10)
 	_menu_bar.add_child(menu_row)
-	for entry in [["Shop", Router.SHOP], ["Inventory", Router.INVENTORY], ["Customize", Router.CUSTOMIZE], ["Profile", Router.PROFILE]]:
+        for entry in [["Play", Router.PLAY], ["Missions", Router.MISSIONS], ["Shop", Router.SHOP], ["Inventory", Router.INVENTORY], ["Customize", Router.CUSTOMIZE], ["Profile", Router.PROFILE], ["Settings", Router.SETTINGS]]:
 		var menu_button := Button.new()
 		menu_button.text = String(entry[0])
 		menu_button.custom_minimum_size = Vector2(120.0, 52.0)

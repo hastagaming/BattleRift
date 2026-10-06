@@ -2,3 +2,7 @@
 build/
 *.jks
 *.keystore
+android/
+android-plugin/.gradle/
+android-plugin/**/build/
+addons/battlerift_notify/bin/
