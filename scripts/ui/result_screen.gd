@@ -5,6 +5,8 @@ var result: Dictionary = {}
 var local_peer: int = 0
 var on_back: Callable = Callable()
 
+var _preview: CharacterPreview
+
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -18,10 +20,15 @@ func _ready() -> void:
 	add_child(center)
 	var panel := PanelContainer.new()
 	center.add_child(panel)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 18)
+	panel.add_child(row)
+	_preview = CharacterPreview.new()
+	row.add_child(_preview)
 	var column := VBoxContainer.new()
 	column.custom_minimum_size = Vector2(460.0, 0.0)
 	column.add_theme_constant_override("separation", 10)
-	panel.add_child(column)
+	row.add_child(column)
 	var title := Label.new()
 	title.text = _title_text()
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -33,27 +40,29 @@ func _ready() -> void:
 	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	summary.add_theme_color_override("font_color", UiTheme.MUTED)
 	column.add_child(summary)
+	var battle_royal := String(result.get("queue_type", "")) == "battle_royal"
 	var place := int(_local_row().get("placement", 0))
-	if String(result.get("queue_type", "")) == "battle_royal" and place > 0:
+	if battle_royal and place > 0:
 		var place_label := Label.new()
 		place_label.text = "Placement #%d of %d" % [place, (result.get("participants", {}) as Dictionary).size()]
 		place_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		place_label.add_theme_font_size_override("font_size", 26)
 		column.add_child(place_label)
 	var scores: Dictionary = result.get("scores", {})
-	if String(result.get("mode", "")) != MatchState.MODE_PRACTICE and not scores.is_empty():
-	var parts: Array[String] = []
-	for team in scores:
-	parts.append("%s %d" % [String(team), int(scores[team])])
-	var score_label := Label.new()
-	score_label.text = "   ".join(parts)
-	score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	score_label.add_theme_font_size_override("font_size", 28)
-	column.add_child(score_label)
+	var show_scores := String(result.get("mode", "")) != MatchState.MODE_PRACTICE and not battle_royal and not scores.is_empty()
+	if show_scores:
+		var parts: Array[String] = []
+		for team in scores:
+			parts.append("%s %d" % [String(team), int(scores[team])])
+		var score_label := Label.new()
+		score_label.text = "   ".join(parts)
+		score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		score_label.add_theme_font_size_override("font_size", 28)
+		column.add_child(score_label)
 	column.add_child(_build_table())
 	var rewards: Dictionary = result.get("rewards", {})
 	if not rewards.is_empty():
-	column.add_child(_build_rewards(rewards))
+		column.add_child(_build_rewards(rewards))
 	var note := String(result.get("note", ""))
 	if not note.is_empty():
 		var note_label := Label.new()
@@ -61,11 +70,30 @@ func _ready() -> void:
 		note_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		note_label.add_theme_color_override("font_color", UiTheme.MUTED)
 		column.add_child(note_label)
+	var emote_button := Button.new()
+	emote_button.text = "Play Emote"
+	emote_button.custom_minimum_size = Vector2(0.0, 48.0)
+	emote_button.pressed.connect(_on_emote_pressed)
+	column.add_child(emote_button)
 	var back := Button.new()
 	back.text = "Back to Lobby"
 	back.custom_minimum_size = Vector2(0.0, 56.0)
 	back.pressed.connect(_on_back_pressed)
 	column.add_child(back)
+	if _title_text() == "VICTORY":
+		get_tree().create_timer(0.8).timeout.connect(_on_emote_pressed)
+
+
+func _on_emote_pressed() -> void:
+	if is_instance_valid(_preview):
+		_preview.play_emote()
+
+
+func _on_back_pressed() -> void:
+	if on_back.is_valid():
+		on_back.call()
+	else:
+		Router.go(Router.LOBBY)
 
 
 func _local_row() -> Dictionary:
@@ -115,6 +143,11 @@ func _cell(text: String, color: Color = UiTheme.TEXT) -> Label:
 	return label
 
 
+func _placement_less(a: Variant, b: Variant) -> bool:
+	var rows: Dictionary = result.get("participants", {})
+	return int(rows[a]["placement"]) < int(rows[b]["placement"])
+
+
 func _build_table() -> GridContainer:
 	var rows: Dictionary = result.get("participants", {})
 	var battle_royal := String(result.get("queue_type", "")) == "battle_royal"
@@ -128,7 +161,7 @@ func _build_table() -> GridContainer:
 		grid.add_child(_cell(header, UiTheme.MUTED))
 	var order: Array = rows.keys()
 	if battle_royal:
-		order.sort_custom(func(a: Variant, b: Variant) -> bool: return int(rows[a]["placement"]) < int(rows[b]["placement"]))
+		order.sort_custom(_placement_less)
 	for peer_id in order:
 		var row: Dictionary = rows[peer_id]
 		var color := UiTheme.GOLD if int(peer_id) == local_peer else UiTheme.TEXT
@@ -160,10 +193,3 @@ func _build_rewards(rewards: Dictionary) -> Label:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_color_override("font_color", UiTheme.GOLD)
 	return label
-
-
-func _on_back_pressed() -> void:
-	if on_back.is_valid():
-		on_back.call()
-	else:
-		Router.go(Router.LOBBY)

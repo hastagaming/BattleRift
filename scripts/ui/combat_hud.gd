@@ -2,6 +2,7 @@ class_name CombatHud
 extends Control
 
 signal editor_toggled(open: bool)
+signal emote_picked(emote_id: String)
 
 var player: PlayerController
 var touch_hud: Control
@@ -25,6 +26,10 @@ func _ready() -> void:
 	row.add_child(_weapon_label)
 	_damage_label = Label.new()
 	row.add_child(_damage_label)
+	var emote_button := Button.new()
+	emote_button.text = "Emotes"
+	emote_button.pressed.connect(_open_emotes)
+	row.add_child(emote_button)
 	var controls_button := Button.new()
 	controls_button.text = "Controls"
 	controls_button.pressed.connect(_open_editor)
@@ -57,6 +62,12 @@ func set_damage(percent: float) -> void:
 	_damage_label.text = "DMG %d%%" % roundi(percent)
 	_damage_label.add_theme_color_override("font_color", UiTheme.TEXT.lerp(UiTheme.DANGER, clampf(percent / 150.0, 0.0, 1.0)))
 	_layout.call_deferred()
+
+
+func _open_emotes() -> void:
+	var picker := EmotePicker.new()
+	picker.picked.connect(func(emote_id: String) -> void: emote_picked.emit(emote_id))
+	get_parent().add_child(picker)
 
 
 func _open_editor() -> void:

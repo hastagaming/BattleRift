@@ -4,9 +4,9 @@ const GAME_NAME := "BattleRift"
 const SAVE_VERSION := 1
 const ALLOW_BOTS := false
 
-const CUSTOM_ROOM_SIZES := {2: "1v1", 4: "2v2", 6: "3v3"}
-const CASUAL_MODES: Array[String] = ["1v1", "2v2", "3v3"]
-const MODE_TEAM_SIZE := {"1v1": 1, "2v2": 2, "3v3": 3}
+const CUSTOM_ROOM_SIZES := {2: "1v1", 4: "2v2", 6: "3v3", 8: "4v4", 10: "5v5", 12: "6v6", 14: "7v7"}
+const CASUAL_MODES: Array[String] = ["1v1", "2v2", "3v3", "4v4", "5v5", "6v6", "7v7"]
+const MODE_TEAM_SIZE := {"1v1": 1, "2v2": 2, "3v3": 3, "4v4": 4, "5v5": 5, "6v6": 6, "7v7": 7}
 
 const CLAN_DEFAULT_CAPACITY := 100
 const CLAN_MAX_CAPACITY := 200

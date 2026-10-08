@@ -1,7 +1,7 @@
 extends ScreenFrame
 
 const QUEUES := [["battle_royal", "Battle Royal"], ["casual", "Casual"], ["ranked", "Ranked"]]
-const MODES := [["1v1", "1v1"], ["2v2", "2v2"], ["3v3", "3v3"]]
+const MODES := [["1v1", "1v1"], ["2v2", "2v2"], ["3v3", "3v3"], ["4v4", "4v4"], ["5v5", "5v5"], ["6v6", "6v6"], ["7v7", "7v7"]]
 const DESCRIPTIONS := {
 	"battle_royal": "Free for all. The last player standing wins, and your Battle Royal rating changes by placement.",
 	"casual": "Team match against players near your rating. Your rating does not change.",
@@ -214,8 +214,7 @@ func _launch() -> void:
 	_searching = false
 	_poll_timer.stop()
 	(_labels["estimate"] as Label).text = "Match found. Connecting..."
-	NetSession.dev = false
-	Router.go(Router.ONLINE_MATCH)
+	PartyService.launch_match()
 
 
 func _stop_search_ui() -> void:

@@ -53,3 +53,9 @@ func _relayout() -> void:
 		var widget: Control = _widgets[element_id]
 		ControlLayout.apply_to_control(widget, element_id, area)
 		widget.queue_redraw()
+
+
+func set_cooldown(element_id: String, ratio: float) -> void:
+	var widget: Variant = _widgets.get(element_id)
+	if widget is TouchButton:
+		(widget as TouchButton).set_cooldown(ratio)

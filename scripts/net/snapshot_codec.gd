@@ -1,7 +1,7 @@
 class_name SnapshotCodec
 extends RefCounted
 
-const PLAYER_STRIDE := 16
+const PLAYER_STRIDE := 18
 const DYNAMIC_STRIDE := 9
 const PROJECTILE_STRIDE := 8
 
@@ -16,11 +16,11 @@ static func record_count(data: PackedFloat32Array, stride: int) -> int:
 	return data.size() / stride
 
 
-static func append_player(out: PackedFloat32Array, slot: int, pos: Vector3, yaw: float, speed: float, flags: int, damage: float, weapon_index: int, torso: Transform3D) -> void:
+static func append_player(out: PackedFloat32Array, slot: int, pos: Vector3, yaw: float, speed: float, flags: int, damage: float, weapon_index: int, torso: Transform3D, pet_cooldown: float = 0.0, skill_cooldown: float = 0.0) -> void:
 	var q := torso.basis.get_rotation_quaternion()
 	out.append_array(PackedFloat32Array([
 		float(slot), pos.x, pos.y, pos.z, yaw, speed, float(flags), damage, float(weapon_index),
-		torso.origin.x, torso.origin.y, torso.origin.z, q.x, q.y, q.z, q.w,
+		torso.origin.x, torso.origin.y, torso.origin.z, q.x, q.y, q.z, q.w, pet_cooldown, skill_cooldown,
 	]))
 
 
@@ -36,6 +36,8 @@ static func read_player(data: PackedFloat32Array, index: int) -> Dictionary:
 		"damage": data[b + 7],
 		"weapon": int(data[b + 8]),
 		"torso": Transform3D(Basis(q), Vector3(data[b + 9], data[b + 10], data[b + 11])),
+		"pet_cd": data[b + 16],
+		"skill_cd": data[b + 17],
 	}
 
 

@@ -7,12 +7,13 @@ var display_name: String = ""
 var team: String = "A"
 
 var _label: Label3D
+var _pet: PetNode
 var _weapon_index: int = -2
 var _damage_shown: int = -1
 var _was_ragdoll: bool = false
 
 
-func setup(slot_id: int, player_name: String, player_team: String, skin_id: String, character_id: String, accessories: Dictionary = {}) -> void:
+func setup(slot_id: int, player_name: String, player_team: String, skin_id: String, character_id: String, accessories: Dictionary = {}, pet_id: String = "") -> void:
 	slot = slot_id
 	display_name = player_name
 	team = player_team
@@ -27,6 +28,11 @@ func setup(slot_id: int, player_name: String, player_team: String, skin_id: Stri
 	_label.modulate = UiTheme.ACCENT if team == "A" else UiTheme.DANGER
 	_label.position = Vector3(0.0, 2.15, 0.0)
 	add_child(_label)
+	_pet = PetNode.new()
+	_pet.top_level = true
+	_pet.follow_target = self
+	add_child(_pet)
+	_pet.setup(pet_id)
 	_refresh_label(0)
 
 
@@ -41,6 +47,10 @@ func play_attack(duration: float) -> void:
 
 func play_emote(emote_id: String) -> void:
 	model.play_emote(emote_id)
+
+
+func pulse_pet() -> void:
+	_pet.pulse()
 
 
 func apply_state(record: Dictionary, delta: float) -> void:

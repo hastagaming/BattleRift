@@ -99,7 +99,7 @@ func _physics_process(delta: float) -> void:
 func _attack(weapon: Dictionary) -> void:
 	var weapon_id := current_id
 	var windup := float(weapon["windup"])
-	_cooldown = maxf(float(weapon["attack_interval"]), windup + float(weapon["cooldown"]))
+	_cooldown = maxf(float(weapon["attack_interval"]), windup + float(weapon["cooldown"])) * owner_body.modifier("attack_interval")
 	owner_body.face(owner_body.aim_direction())
 	owner_body.model.play_attack(maxf(windup + 0.2, 0.15))
 	if weapon.has("guard_time"):
@@ -151,6 +151,18 @@ func _apply_spread(direction: Vector3, spread: float) -> Vector3:
 	return tilted.rotated(direction, randf() * TAU)
 
 
+# A solid barrier between the attacker and the target stops melee hits.
+func _blocked_by_barrier(collider: Node3D) -> bool:
+	var from := owner_body.global_position + Vector3(0.0, 1.0, 0.0)
+	var to := collider.global_position + Vector3(0.0, 1.0, 0.0)
+	var query := PhysicsRayQueryParameters3D.create(from, to, PhysicsLayers.WORLD, _exclude())
+	var hit := owner_body.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return false
+	var blocker := hit["collider"] as Node
+	return blocker != null and blocker.is_in_group("barrier")
+
+
 func _melee(weapon: Dictionary, weapon_id: String) -> void:
 	var forward := owner_body.aim_direction()
 	var flat := Vector3(forward.x, 0.0, forward.z)
@@ -178,6 +190,8 @@ func _melee(weapon: Dictionary, weapon_id: String) -> void:
 		to_target.y = 0.0
 		var to_target_dir := to_target.normalized() if to_target.length() > 0.05 else flat
 		if flat.angle_to(to_target_dir) > half_arc:
+			continue
+		if _blocked_by_barrier(collider):
 			continue
 		done[target.get_instance_id()] = true
 		var direction := (flat * 0.65 + to_target_dir * 0.35).normalized()

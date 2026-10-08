@@ -12,6 +12,7 @@ const END_LINGER := 8.0
 const INPUT_TIMEOUT := 0.25
 const MAX_INPUT_RATE := 90.0
 const MAX_ACTION_RATE := 30.0
+const EMOTE_COOLDOWN_MSEC := 1000
 const RESPAWN_DELAY := 2.5
 const COUNTDOWN := 3.0
 
@@ -52,6 +53,7 @@ func _ready() -> void:
 	add_child(_viewport)
 	_world = Node3D.new()
 	_viewport.add_child(_world)
+	hub.emote_received.connect(_on_emote_request)
 	if not open_roster:
 		var index := 0
 		for entry in room.get("members", []):
@@ -71,12 +73,15 @@ func _make_member(slot: int, user_id: String, display_name: String, team: String
 		"skin": "default",
 		"character": "rifter",
 		"emote": "wave",
+		"emotes": [],
+		"pet": "",
 		"accessories": {},
 		"ratings": {},
 		"owned": [],
 		"equipped_weapon": "",
 		"weapon": "",
 		"last_seq": -1,
+		"last_emote_msec": 0,
 		"since_input": 0.0,
 		"input_tokens": MAX_INPUT_RATE,
 		"action_tokens": MAX_ACTION_RATE,
@@ -105,11 +110,21 @@ func add_peer(peer_id: int, identity: Dictionary) -> Dictionary:
 	var member: Dictionary = _members[slot]
 	if bool(member["connected"]):
 		return {"ok": false, "error": "Already connected"}
+	var pet_id := String(identity.get("pet", ""))
+	if pet_id.is_empty() and open_roster:
+		pet_id = PetDb.ORDER[(slot - 1) % PetDb.ORDER.size()]
+	var character_id := String(identity.get("character", ""))
+	if open_roster and character_id.is_empty():
+		character_id = CharacterDb.ORDER[(slot - 1) % CharacterDb.ORDER.size()]
+	elif not CharacterDb.has(character_id):
+		character_id = "rifter"
 	member["connected"] = true
 	member["peer"] = peer_id
 	member["skin"] = String(identity["skin"])
-	member["character"] = String(identity["character"])
+	member["character"] = character_id
 	member["emote"] = String(identity["emote"])
+	member["emotes"] = identity.get("emotes", [])
+	member["pet"] = pet_id
 	member["accessories"] = identity["accessories"]
 	member["ratings"] = identity.get("ratings", {})
 	member["owned"] = identity["owned"]
@@ -226,16 +241,22 @@ func _spawn_bodies() -> void:
 		var body := PlayerController.new()
 		body.remote_input = PlayerInput.new()
 		body.peer_id = slot
+		body.team = String(member["team"])
 		body.auto_respawn = false
 		body.emote_id = String(member["emote"])
 		body.spawn_point = arena.spawn_points[spawn_index]
 		body.position = body.spawn_point
 		_world.add_child(body)
 		body.model.apply_appearance(String(member["skin"]), String(member["character"]), member["accessories"])
+		body.skill.set_character(String(member["character"]))
+		body.pet.set_pet(String(member["pet"]))
 		body.controllable = false
 		body.fell_out.connect(_on_fell_out.bind(slot))
 		body.emote_played.connect(_on_emote.bind(slot))
 		body.weapons.attacked.connect(_on_attack.bind(slot))
+		body.pet.triggered.connect(_on_pet.bind(slot))
+		body.pet.barrier_created.connect(_on_barrier.bind(slot))
+		body.skill.triggered.connect(_on_skill.bind(slot))
 		_bodies[slot] = body
 
 
@@ -250,6 +271,7 @@ func _broadcast_setup() -> void:
 			"skin": member["skin"],
 			"character": member["character"],
 			"emote": member["emote"],
+			"pet": member["pet"],
 			"accessories": member["accessories"],
 		})
 	for slot in _slots:
@@ -336,6 +358,23 @@ func on_action(peer_id: int, action: int) -> void:
 	(_bodies[slot] as PlayerController).remote_input.press(action)
 
 
+# A player may only play emotes they own, and not more than once per second.
+func _on_emote_request(peer_id: int, emote_choice: String) -> void:
+	var slot := int(_peer_slot.get(peer_id, 0))
+	if slot == 0 or not _bodies.has(slot) or stage != Stage.RUNNING:
+		return
+	var member: Dictionary = _members[slot]
+	if emote_choice not in CharacterModel.EMOTES or emote_choice not in member["emotes"]:
+		return
+	var now := Time.get_ticks_msec()
+	if now - int(member["last_emote_msec"]) < EMOTE_COOLDOWN_MSEC:
+		return
+	member["last_emote_msec"] = now
+	var body: PlayerController = _bodies[slot]
+	body.emote_id = emote_choice
+	body.remote_input.press(PlayerInput.EMOTE)
+
+
 func _refill_budgets(delta: float) -> void:
 	for slot in _slots:
 		var member: Dictionary = _members[slot]
@@ -409,6 +448,42 @@ func _on_attack(weapon_id: String, slot: int) -> void:
 
 func _on_emote(emote: String, slot: int) -> void:
 	broadcast_event({"type": "emote", "slot": slot, "id": emote})
+
+
+func _on_pet(pet_id: String, center: Vector3, slot: int) -> void:
+	var pet := PetDb.get_pet(pet_id)
+	if String(pet.get("kind", "")) == PetDb.KIND_BARRIER:
+		return
+	broadcast_event({
+		"type": "pet",
+		"slot": slot,
+		"pet": pet_id,
+		"pos": center,
+		"radius": PetDb.effect_radius(pet),
+	})
+
+
+func _on_barrier(at: Vector3, yaw: float, duration: float, width: float, height: float, color: Color, slot: int) -> void:
+	broadcast_event({
+		"type": "barrier",
+		"slot": slot,
+		"pos": at,
+		"yaw": yaw,
+		"duration": duration,
+		"width": width,
+		"height": height,
+		"color": color,
+	})
+
+
+func _on_skill(character_id: String, center: Vector3, slot: int) -> void:
+	broadcast_event({
+		"type": "skill",
+		"slot": slot,
+		"pos": center,
+		"radius": CharacterDb.effect_radius(CharacterDb.get_skill(character_id)),
+		"color": CharacterDb.color_of(character_id),
+	})
 
 
 func _on_fell_out(attacker: Node, slot: int) -> void:
@@ -491,7 +566,9 @@ func _send_snapshot() -> void:
 			flags,
 			body.damage_percent,
 			WeaponDb.ORDER.find(body.weapons.current_id),
-			body.ragdoll_transform()
+			body.ragdoll_transform(),
+			body.pet.cooldown_remaining(),
+			body.skill.cooldown_remaining()
 		)
 	var dynamics := PackedFloat32Array()
 	for node in arena.dynamics:

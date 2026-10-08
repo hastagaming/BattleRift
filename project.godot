@@ -19,6 +19,7 @@ InputHub="*res://scripts/core/input_hub.gd"
 Supabase="*res://scripts/backend/supabase_client.gd"
 AuthService="*res://scripts/auth/auth_service.gd"
 AppNotify="*res://scripts/core/app_notify.gd"
+PartyService="*res://scripts/core/party_service.gd"
 
 [editor_plugins]
 

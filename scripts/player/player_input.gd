@@ -6,7 +6,9 @@ const DASH := 2
 const ATTACK := 4
 const SWITCH := 8
 const EMOTE := 16
-const ALL_ACTIONS := 31
+const PET := 32
+const ABILITY := 64
+const ALL_ACTIONS := 127
 const MAX_PITCH := 1.4
 
 var move: Vector2 = Vector2.ZERO
@@ -74,3 +76,7 @@ func capture_local(camera_yaw: float, camera_pitch: float) -> void:
 		_edges |= SWITCH
 	if Input.is_action_just_pressed("emote"):
 		_edges |= EMOTE
+	if Input.is_action_just_pressed("pet_ability"):
+		_edges |= PET
+	if Input.is_action_just_pressed("ability"):
+		_edges |= ABILITY

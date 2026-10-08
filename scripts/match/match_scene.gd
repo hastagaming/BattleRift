@@ -1,6 +1,6 @@
 extends Node3D
 
-const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote"]
+const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote", "pet_ability", "ability"]
 
 var state: MatchState
 var arena: Arena
@@ -97,6 +97,7 @@ func _build_ui() -> void:
 	var combat_hud := CombatHud.new()
 	combat_hud.player = player
 	combat_hud.touch_hud = touch_hud
+	combat_hud.emote_picked.connect(_on_emote_picked)
 	_layer.add_child(combat_hud)
 	spectator = Spectator.new()
 	spectator.state = state
@@ -107,6 +108,10 @@ func _build_ui() -> void:
 	var spectator_hud := SpectatorHud.new()
 	spectator_hud.spectator = spectator
 	_layer.add_child(spectator_hud)
+
+
+func _on_emote_picked(emote_id: String) -> void:
+	player.model.play_emote(emote_id)
 
 
 func _on_weapon_confirmed(weapon_id: String) -> void:
@@ -174,6 +179,15 @@ func _on_leave_requested() -> void:
 				Router.go(Router.LOBBY)
 
 
+func _on_participant_changed(peer_id: int) -> void:
+	if peer_id != local_peer:
+		return
+	if String(state.participant(local_peer).get("state", "")) == MatchState.STATE_OUT:
+		spectator.start()
+	else:
+		spectator.stop()
+
+
 func _on_match_ended(final_result: Dictionary) -> void:
 	spectator.stop()
 	touch_hud.visible = false
@@ -182,12 +196,3 @@ func _on_match_ended(final_result: Dictionary) -> void:
 	screen.result = final_result
 	screen.local_peer = local_peer
 	_layer.add_child(screen)
-
-
-func _on_participant_changed(peer_id: int) -> void:
-	if peer_id != local_peer:
-		return
-	if String(state.participant(local_peer).get("state", "")) == MatchState.STATE_OUT:
-		spectator.start()
-	else:
-		spectator.stop()

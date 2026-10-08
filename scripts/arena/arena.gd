@@ -3,7 +3,7 @@ extends Node3D
 
 const PLATFORM_COLOR := Color("#20283d")
 const ACCENT_COLOR := Color("#2c3552")
-const TEAM_SPAWNS := {"A": [0, 1, 4], "B": [2, 3, 5]}
+const TEAM_SPAWNS := {"A": [0, 1, 4, 8, 9, 6, 12], "B": [2, 3, 5, 10, 11, 7, 13]}
 
 var spawn_points: Array[Vector3] = []
 var dynamics: Array[Node3D] = []
@@ -171,5 +171,7 @@ func _build_spawns() -> void:
 		Vector3(-2.8, 0.1, 2.8),
 		Vector3(-2.8, 0.1, -2.8),
 		Vector3(2.8, 0.1, -2.8),
+		Vector3(0.0, 0.1, 4.4),
+		Vector3(0.0, 0.1, -4.4),
 	]:
 		spawn_points.append(at)

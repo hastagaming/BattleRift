@@ -6,6 +6,7 @@ signal auth_received(peer_id: int, token: String)
 signal weapon_received(peer_id: int, weapon_id: String)
 signal input_received(peer_id: int, seq: int, move_x: float, move_y: float, yaw: float, pitch: float, held: bool)
 signal action_received(peer_id: int, action: int)
+signal emote_received(peer_id: int, emote_id: String)
 signal leave_received(peer_id: int)
 
 # Client side: signals emitted when the server calls an RPC.
@@ -40,6 +41,12 @@ func srv_input(seq: int, move_x: float, move_y: float, yaw: float, pitch: float,
 func srv_action(action: int) -> void:
 	if multiplayer.is_server():
 		action_received.emit(multiplayer.get_remote_sender_id(), action)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func srv_emote(emote_id: String) -> void:
+	if multiplayer.is_server():
+		emote_received.emit(multiplayer.get_remote_sender_id(), emote_id)
 
 
 @rpc("any_peer", "call_remote", "reliable")

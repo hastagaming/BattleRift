@@ -27,8 +27,6 @@ const SLOT_LABELS := {
 const FALLBACK_COLOR := Color("#8b94ad")
 
 const ITEMS := {
-	"rifter": {"category": "character", "name": "Rifter", "desc": "The default Rift runner.", "color": Color("#38e8c6")},
-	"vanguard": {"category": "character", "name": "Vanguard", "desc": "Red-armored front liner.", "color": Color("#ff5a5f")},
 	"default": {"category": "skin", "name": "Classic", "desc": "Standard skin tone.", "color": Color("#d9a273")},
 	"frost": {"category": "skin", "name": "Frost", "desc": "Icy blue skin.", "color": Color("#8fd3ff")},
 	"ember": {"category": "skin", "name": "Ember", "desc": "Glowing orange skin.", "color": Color("#ff7a4d")},
@@ -47,6 +45,10 @@ const LOCAL_PRICES := {
 	"ember": ["cr", 500],
 	"shadow": ["br", 120],
 	"vanguard": ["cr", 1500],
+	"striker": ["cr", 2000],
+	"sprite": ["cr", 2000],
+	"titan": ["cr", 2500],
+	"oracle": ["br", 300],
 	"spin": ["cr", 300],
 	"cheer": ["cr", 300],
 	"hammer": ["cr", 800],
@@ -60,12 +62,31 @@ const LOCAL_PRICES := {
 	"visor": ["cr", 400],
 	"scarf": ["cr", 300],
 	"cape": ["br", 150],
+	"pet_volt": ["cr", 1200],
+	"pet_blaze": ["cr", 1200],
+	"pet_frost": ["cr", 1200],
+	"pet_aero": ["cr", 1200],
+	"pet_terra": ["cr", 1200],
+	"pet_shadow": ["br", 200],
+	"pet_riftling": ["br", 200],
+	"pet_falcon": ["cr", 1500],
+	"pet_catty": ["cr", 1500],
+	"pet_creaton": ["br", 250],
 }
 
 
 static func info(item_id: String) -> Dictionary:
 	if ITEMS.has(item_id):
 		return ITEMS[item_id]
+	if CharacterDb.has(item_id):
+		var character := CharacterDb.get_character(item_id)
+		var skill: Dictionary = character["skill"]
+		return {
+			"category": "character",
+			"name": String(character["name"]),
+			"desc": "%s  |  Skill: %s  |  Passive: %s" % [String(character["role"]), String(skill["name"]), String(character["passive_name"])],
+			"color": character["color"],
+		}
 	if WeaponDb.has(item_id):
 		var weapon := WeaponDb.get_weapon(item_id)
 		return {
@@ -73,6 +94,15 @@ static func info(item_id: String) -> Dictionary:
 			"name": String(weapon["name"]),
 			"desc": "%s  |  DMG %.1f  KB %.1f" % [String(weapon["kind"]).capitalize(), float(weapon["damage"]), float(weapon["knockback"])],
 			"color": weapon["color"],
+		}
+	if PetDb.has(item_id):
+		var pet := PetDb.get_pet(item_id)
+		var prefix := "Passive " if PetDb.is_passive(pet) else ""
+		return {
+			"category": "pet",
+			"name": String(pet["name"]),
+			"desc": "%s%s: %s" % [prefix, String(pet["ability_name"]), String(pet["desc"])],
+			"color": pet["color"],
 		}
 	return {}
 

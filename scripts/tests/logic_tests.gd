@@ -22,6 +22,9 @@ func _initialize() -> void:
 	_test_rank_system()
 	_test_placements()
 	_test_placement_rewards()
+	_test_pets()
+	_test_characters()
+	_test_room_sizes()
 	print("Finished with %d failure(s)" % _failures)
 	quit(1 if _failures > 0 else 0)
 
@@ -177,8 +180,8 @@ func _test_input_validation() -> void:
 	_check(input.apply_state(Vector2(5.0, 0.0), 0.0, 9.0, true), "a valid state is accepted")
 	_check(input.move.length() <= 1.0001, "movement vector is clamped to unit length")
 	_check(absf(input.pitch) <= PlayerInput.MAX_PITCH + 0.0001, "pitch is clamped")
-	_check(PlayerInput.is_single_action(4), "a single known action is accepted")
-	_check(not PlayerInput.is_single_action(6) and not PlayerInput.is_single_action(0) and not PlayerInput.is_single_action(32), "combined or unknown actions are rejected")
+	_check(PlayerInput.is_single_action(4) and PlayerInput.is_single_action(PlayerInput.PET) and PlayerInput.is_single_action(PlayerInput.ABILITY), "single known actions are accepted")
+	_check(not PlayerInput.is_single_action(6) and not PlayerInput.is_single_action(0) and not PlayerInput.is_single_action(128), "combined or unknown actions are rejected")
 	input.press(PlayerInput.JUMP)
 	_check(input.take(PlayerInput.JUMP) and not input.take(PlayerInput.JUMP), "an action edge is consumed once")
 
@@ -296,3 +299,61 @@ func _test_placement_rewards() -> void:
 	var last := RewardRules.for_placement(12, 12, 0, false)
 	_check(int(first["cr"]) > int(middle["cr"]) and int(middle["cr"]) > int(last["cr"]), "better placements pay more")
 	_check(int(RewardRules.for_placement(1, 12, 0, true)["cr"]) == 0, "leaving early pays nothing in battle royal")
+
+
+func _test_pets() -> void:
+	var balanced := true
+	for pet_id in PetDb.ORDER:
+		if not PetDb.is_balanced(PetDb.get_pet(pet_id)):
+			balanced = false
+	_check(balanced, "every pet respects the limits")
+	_check(PetDb.ids().size() == 10, "the pet list has all ten pets")
+	_check(String(ItemDb.info("pet_volt")["category"]) == "pet", "pets show up in the item database")
+	_check(ItemDb.slot_of("pet", "pet_volt") == "pet", "pets use the pet slot")
+	_check(not PetDb.has("volt") and not PetDb.has(""), "unknown pet ids are rejected")
+	_check(PetDb.get_pet("pet_falcon")["kind"] == PetDb.KIND_PASSIVE and PetDb.get_pet("pet_catty")["kind"] == PetDb.KIND_PASSIVE, "falcon and catty are passive pets")
+	_check(PetDb.get_pet("pet_creaton")["kind"] == PetDb.KIND_BARRIER, "creaton is an active pet that builds a wall")
+	_check(float(PetDb.get_pet("pet_creaton")["cooldown"]) >= PetDb.MIN_COOLDOWN, "creaton has a real cooldown")
+	var premium_stronger := false
+	for pet_id in ["pet_shadow", "pet_riftling", "pet_creaton"]:
+		var premium := PetDb.get_pet(pet_id)
+		if float(premium.get("damage", 0.0)) > PetDb.MAX_DAMAGE or float(premium["cooldown"]) < PetDb.MIN_COOLDOWN:
+			premium_stronger = true
+	_check(not premium_stronger, "premium pets are not stronger than the limits")
+
+
+func _test_characters() -> void:
+	var balanced := true
+	for character_id in CharacterDb.ORDER:
+		if not CharacterDb.is_balanced(character_id):
+			balanced = false
+	_check(balanced, "every character skill and passive respects the limits")
+	_check(CharacterDb.ORDER.size() == 6, "the character list has all six characters")
+	_check(CharacterDb.has("rifter") and not CharacterDb.has("nobody"), "unknown character ids are rejected")
+	_check(String(ItemDb.info("titan")["category"]) == "character", "characters show up in the item database")
+	_check(PassiveLimits.is_valid({"hitstun": 0.9}), "a mild passive is valid")
+	_check(not PassiveLimits.is_valid({"hitstun": 0.2}) and not PassiveLimits.is_valid({"unknown": 1.0}), "extreme or unknown passives are rejected")
+	_check(is_equal_approx(PassiveLimits.clamp_value("knockback_taken", 0.5), 0.85), "stacked passives are clamped")
+
+
+func _test_room_sizes() -> void:
+	var config: Node = load("res://scripts/core/game_config.gd").new()
+	var all_valid := true
+	for size_value in [2, 4, 6, 8, 10, 12, 14]:
+		if not config.is_valid_custom_room_size(size_value):
+			all_valid = false
+	_check(all_valid, "room sizes from 2 to 14 players in steps of two are valid")
+	_check(not config.is_valid_custom_room_size(16) and not config.is_valid_custom_room_size(7) and not config.is_valid_custom_room_size(0), "other room sizes are rejected")
+	_check(config.mode_for_room_size(14) == "7v7", "14 players is a 7v7")
+	var players := {}
+	var teams := {}
+	for i in 14:
+		players[i] = {"ready": true}
+		teams[i] = "A" if i < 7 else "B"
+	_check(bool(config.can_start_match(players, teams, 14, 0)["ok"]), "a full 7v7 room can start")
+	teams[13] = "A"
+	_check(not bool(config.can_start_match(players, teams, 14, 0)["ok"]), "an unbalanced 7v7 room cannot start")
+	config.free()
+	var rank: Node = load("res://scripts/rank/rank_system.gd").new()
+	_check(rank.is_valid_context("7v7") and rank.new_ratings().has("5v5"), "ratings exist for every team size")
+	rank.free()

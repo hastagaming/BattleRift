@@ -68,7 +68,8 @@ func _run() -> void:
 		_bar.value = float(done) / float(checks.size())
 		await get_tree().process_frame
 	_status.text = "Restoring session"
-	  if await AuthService.restore_session():
-		  Router.go(Router.LOBBY)
-	  else:
-		  Router.go(Router.AUTH)
+	var restored: bool = await AuthService.restore_session()
+	if restored:
+		Router.go(Router.LOBBY)
+	else:
+		Router.go(Router.AUTH)

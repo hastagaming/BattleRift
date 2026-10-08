@@ -6,6 +6,7 @@ var spin_speed: float = 0.6
 
 var _viewport: SubViewport
 var _pivot: Node3D
+var _pet: PetNode
 var _dragging: bool = false
 
 
@@ -30,12 +31,15 @@ func _ready() -> void:
 	var camera := Camera3D.new()
 	camera.fov = 32.0
 	_viewport.add_child(camera)
-	camera.look_at_from_position(Vector3(0.0, 1.15, 4.2), Vector3(0.0, 0.95, 0.0))
+	camera.look_at_from_position(Vector3(0.0, 1.15, 4.6), Vector3(0.0, 0.95, 0.0))
 	_pivot = Node3D.new()
 	_pivot.rotation.y = PI
 	_viewport.add_child(_pivot)
 	model = CharacterModel.new()
 	_pivot.add_child(model)
+	_pet = PetNode.new()
+	_pet.idle_position = Vector3(0.85, 1.2, 0.1)
+	_pivot.add_child(_pet)
 	refresh()
 
 
@@ -59,9 +63,12 @@ func _process(delta: float) -> void:
 func refresh() -> void:
 	model.apply_equipped()
 	var weapon_id := ""
+	var pet_id := ""
 	if PlayerData.is_signed_in:
 		weapon_id = String(PlayerData.data["equipped"].get("weapon", ""))
+		pet_id = String(PlayerData.data["equipped"].get("pet", ""))
 	model.set_weapon(weapon_id if WeaponDb.has(weapon_id) else "")
+	_pet.setup(pet_id)
 
 
 func play_emote() -> void:

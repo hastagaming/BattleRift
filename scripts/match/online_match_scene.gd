@@ -1,7 +1,7 @@
 extends Node3D
 
-const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote"]
-const ACTION_MAP := [["jump", 1], ["dash", 2], ["attack", 4], ["weapon_switch", 8], ["emote", 16]]
+const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote", "pet_ability", "ability"]
+const ACTION_MAP := [["jump", 1], ["dash", 2], ["attack", 4], ["weapon_switch", 8], ["emote", 16], ["pet_ability", 32], ["ability", 64]]
 const CONNECT_TIMEOUT := 12.0
 const INPUT_EVERY := 2
 
@@ -17,11 +17,12 @@ var my_slot: int = 0
 
 var _layer: CanvasLayer
 var _status_root: Control
-var _backdrop: ColorRect
 var _status_label: Label
 var _leave_button: Button
 var _buffer := SnapshotBuffer.new()
 var _proxies: Dictionary = {}
+var _pets: Dictionary = {}
+var _characters: Dictionary = {}
 var _projectiles: Dictionary = {}
 var _token: String = ""
 var _connected: bool = false
@@ -65,10 +66,10 @@ func _build_status() -> void:
 	_status_root = Control.new()
 	_status_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_layer.add_child(_status_root)
-	_backdrop = ColorRect.new()
-	_backdrop.color = UiTheme.BG
-	_backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_status_root.add_child(_backdrop)
+	var backdrop := ColorRect.new()
+	backdrop.color = UiTheme.BG
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_status_root.add_child(backdrop)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_status_root.add_child(center)
@@ -105,7 +106,8 @@ func _session_token() -> String:
 	if NetSession.dev:
 		var base_name := String(PlayerData.data["profile"]["name"]).left(16)
 		return "dev:%s-%04d" % [base_name, randi() % 10000]
-	if not await Supabase.ensure_fresh():
+	var fresh: bool = await Supabase.ensure_fresh()
+	if not fresh:
 		return ""
 	return Supabase.access_token
 
@@ -157,6 +159,10 @@ func _on_abort(reason: String) -> void:
 	_fail(reason)
 
 
+func _on_editor_toggled(open: bool) -> void:
+	_editing = open
+
+
 func _on_setup(data: Dictionary) -> void:
 	if _setup_done:
 		return
@@ -190,9 +196,11 @@ func _on_setup(data: Dictionary) -> void:
 		}
 		if not mirror.scores.has(team):
 			mirror.scores[team] = 0
+		_pets[slot] = String(info.get("pet", ""))
+		_characters[slot] = String(info.get("character", "rifter"))
 		var proxy := RemotePlayer.new()
 		add_child(proxy)
-				proxy.setup(slot, String(info["name"]), team, String(info["skin"]), String(info["character"]), info.get("accessories", {}))
+		proxy.setup(slot, String(info["name"]), team, String(info["skin"]), String(info["character"]), info.get("accessories", {}), String(info.get("pet", "")))
 		proxy.visible = false
 		_proxies[slot] = proxy
 	camera_rig.target = _proxies[my_slot]
@@ -216,7 +224,8 @@ func _build_ui() -> void:
 	_layer.add_child(match_hud)
 	combat_hud = CombatHud.new()
 	combat_hud.touch_hud = touch_hud
-	combat_hud.editor_toggled.connect(func(open: bool) -> void: _editing = open)
+	combat_hud.editor_toggled.connect(_on_editor_toggled)
+	combat_hud.emote_picked.connect(_on_emote_picked)
 	_layer.add_child(combat_hud)
 	spectator = Spectator.new()
 	spectator.state = mirror
@@ -230,6 +239,11 @@ func _build_ui() -> void:
 	mirror.participant_changed.connect(_on_participant_changed)
 	mirror.phase_changed.connect(_on_phase_changed)
 	_status_root.move_to_front()
+
+
+func _on_emote_picked(emote_id: String) -> void:
+	if mirror.phase == MatchState.Phase.ACTIVE and not _leaving:
+		hub.rpc_id(1, "srv_emote", emote_id)
 
 
 func _on_weapon_confirmed(weapon_id: String) -> void:
@@ -274,6 +288,18 @@ func _on_event(data: Dictionary) -> void:
 			var actor: RemotePlayer = _proxies.get(int(data["slot"]))
 			if actor != null:
 				actor.play_emote(String(data["id"]))
+		"pet":
+			var owner_proxy: RemotePlayer = _proxies.get(int(data["slot"]))
+			if owner_proxy != null:
+				owner_proxy.pulse_pet()
+			var pet := PetDb.get_pet(String(data["pet"]))
+			if not pet.is_empty():
+				var pet_color: Color = pet["color"]
+				NetEffects.blast(self, data["pos"], float(data["radius"]), pet_color)
+		"skill":
+			NetEffects.blast(self, data["pos"], float(data["radius"]), data["color"])
+		"barrier":
+			Barrier.spawn(self, data["pos"], float(data["yaw"]), float(data["duration"]), float(data["width"]), float(data["height"]), false, data["color"])
 		"knockout":
 			mirror.player_knocked_out.emit(int(data["victim"]), int(data["killer"]))
 		"blast":
@@ -312,6 +338,7 @@ func _exit_to_lobby() -> void:
 	if _leaving:
 		return
 	_leaving = true
+	PartyService.suppress_launch(12.0)
 	_leave_button.disabled = true
 	_set_status("Leaving...", false)
 	var peer := multiplayer.multiplayer_peer
@@ -363,6 +390,13 @@ func _update_local_hud(record: Dictionary) -> void:
 	if damage != _last_damage:
 		_last_damage = damage
 		combat_hud.set_damage(float(damage))
+	var pet := PetDb.get_pet(String(_pets.get(my_slot, "")))
+	if not pet.is_empty() and not PetDb.is_passive(pet):
+		var pet_total := maxf(float(pet.get("cooldown", 1.0)), 0.1)
+		touch_hud.set_cooldown("pet_ability", clampf(float(record["pet_cd"]) / pet_total, 0.0, 1.0))
+	var skill := CharacterDb.get_skill(String(_characters.get(my_slot, "rifter")))
+	var skill_total := maxf(float(skill.get("cooldown", 1.0)), 0.1)
+	touch_hud.set_cooldown("ability", clampf(float(record["skill_cd"]) / skill_total, 0.0, 1.0))
 
 
 func _apply_dynamics(data: PackedFloat32Array) -> void:

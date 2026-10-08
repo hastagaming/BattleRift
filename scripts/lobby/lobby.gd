@@ -1,16 +1,18 @@
 extends Node3D
 
 const ARENA_RADIUS := 14.0
-const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote"]
+const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote", "pet_ability", "ability"]
 
 var _player: PlayerController
 var _camera_rig: CameraRig
 var _top_bar: PanelContainer
+var _menu_bar: PanelContainer
+var _social_button: Button
 var _name_label: Label
 var _rank_label: Label
 var _cr_label: Label
 var _br_label: Label
-var _menu_bar: PanelContainer
+var _party_label: Label
 
 
 func _ready() -> void:
@@ -29,9 +31,11 @@ func _ready() -> void:
 	PlayerData.data_changed.connect(_refresh_ui)
 	PlayerData.signed_out.connect(_on_signed_out)
 	Economy.balance_changed.connect(_on_balance_changed)
+	PartyService.state_changed.connect(_on_party_changed)
 	get_viewport().size_changed.connect(_layout_ui)
 	_refresh_ui()
 	_layout_ui()
+	_on_party_changed(PartyService.state)
 	AppNotify.ask_once()
 
 
@@ -171,8 +175,8 @@ func _spawn_player() -> void:
 	_player.position = _player.spawn_point
 	add_child(_player)
 	_player.weapons.set_available(WeaponDb.ids())
-	  var training_range := LobbyRange.new()
-	  add_child(training_range)
+	var training_range := LobbyRange.new()
+	add_child(training_range)
 	_camera_rig = CameraRig.new()
 	_camera_rig.target = _player
 	add_child(_camera_rig)
@@ -198,6 +202,10 @@ func _build_ui() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
+	_party_label = Label.new()
+	_party_label.add_theme_color_override("font_color", UiTheme.ACCENT)
+	_party_label.visible = false
+	row.add_child(_party_label)
 	_cr_label = Label.new()
 	_cr_label.add_theme_color_override("font_color", UiTheme.GOLD)
 	row.add_child(_cr_label)
@@ -222,21 +230,34 @@ func _build_ui() -> void:
 	sign_out_button.pressed.connect(PlayerData.sign_out)
 	row.add_child(sign_out_button)
 	layer.add_child(_top_bar)
-		_menu_bar = PanelContainer.new()
+	_menu_bar = PanelContainer.new()
 	var menu_row := HBoxContainer.new()
 	menu_row.add_theme_constant_override("separation", 10)
 	_menu_bar.add_child(menu_row)
-        for entry in [["Play", Router.PLAY], ["Missions", Router.MISSIONS], ["Shop", Router.SHOP], ["Inventory", Router.INVENTORY], ["Customize", Router.CUSTOMIZE], ["Profile", Router.PROFILE], ["Settings", Router.SETTINGS]]:
+	var entries := [
+		["Play", Router.PLAY],
+		["Social", Router.SOCIAL],
+		["Missions", Router.MISSIONS],
+		["Shop", Router.SHOP],
+		["Inventory", Router.INVENTORY],
+		["Customize", Router.CUSTOMIZE],
+		["Profile", Router.PROFILE],
+		["Settings", Router.SETTINGS],
+	]
+	for entry in entries:
 		var menu_button := Button.new()
 		menu_button.text = String(entry[0])
-		menu_button.custom_minimum_size = Vector2(120.0, 52.0)
+		menu_button.custom_minimum_size = Vector2(110.0, 52.0)
 		menu_button.pressed.connect(Router.go.bind(String(entry[1])))
 		menu_row.add_child(menu_button)
+		if String(entry[0]) == "Social":
+			_social_button = menu_button
 	layer.add_child(_menu_bar)
 	var combat_hud := CombatHud.new()
-	  combat_hud.player = _player
-	  combat_hud.touch_hud = hud
-	  layer.add_child(combat_hud)
+	combat_hud.player = _player
+	combat_hud.touch_hud = hud
+	combat_hud.emote_picked.connect(_on_emote_picked)
+	layer.add_child(combat_hud)
 
 
 func _layout_ui() -> void:
@@ -272,6 +293,28 @@ func _refresh_ui() -> void:
 	_rank_label.text = _best_rank_text()
 	_cr_label.text = "CR %d" % Economy.balance(Economy.CR)
 	_br_label.text = "BR %d" % Economy.balance(Economy.BR)
+
+
+func _on_party_changed(state: Dictionary) -> void:
+	if _party_label == null or _social_button == null:
+		return
+	var party: Variant = state.get("party")
+	if party is Dictionary and not (party as Dictionary).is_empty():
+		var members: Array = (party as Dictionary)["members"]
+		_party_label.text = "Party %d/%d" % [members.size(), int((party as Dictionary)["max"])]
+		_party_label.visible = true
+	else:
+		_party_label.visible = false
+	var invites: Array = state.get("invites", [])
+	if invites.is_empty():
+		_social_button.text = "Social"
+	else:
+		_social_button.text = "Social (%d)" % invites.size()
+	_layout_ui.call_deferred()
+
+
+func _on_emote_picked(emote_id: String) -> void:
+	_player.model.play_emote(emote_id)
 
 
 func _on_balance_changed(_currency: String, _balance: int) -> void:

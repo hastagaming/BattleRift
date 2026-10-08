@@ -29,21 +29,30 @@ var controllable: bool = true
 var spawn_point: Vector3 = Vector3.ZERO
 var model: CharacterModel
 var weapons: WeaponController
+var skill: SkillController
+var pet: PetController
 var damage_percent: float = 0.0
 var guard_remaining: float = 0.0
+var invulnerable_remaining: float = 0.0
 var auto_respawn: bool = true
 var last_attacker: Node
 var remote_input: PlayerInput
 var peer_id: int = 0
+var team: String = ""
 var emote_id: String = ""
 var is_active: bool = true
 
 var _shape_node: CollisionShape3D
 var _ragdoll: Ragdoll
+var _pet_visual: PetNode
 var _ragdoll_time: float = 0.0
 var _dash_time: float = 0.0
 var _dash_cooldown: float = 0.0
 var _hitstun: float = 0.0
+var _slow_factor: float = 1.0
+var _slow_time: float = 0.0
+var _haste_factor: float = 1.0
+var _haste_time: float = 0.0
 var _last_hit_msec: int = -100000
 var _gravity_sources: Dictionary = {}
 var _local_input := PlayerInput.new()
@@ -64,12 +73,45 @@ func _ready() -> void:
 	weapons = WeaponController.new()
 	weapons.owner_body = self
 	add_child(weapons)
+	skill = SkillController.new()
+	skill.owner_body = self
+	add_child(skill)
+	pet = PetController.new()
+	pet.owner_body = self
+	add_child(pet)
+	if remote_input == null and not NetBus.headless:
+		_pet_visual = PetNode.new()
+		_pet_visual.top_level = true
+		_pet_visual.follow_target = self
+		add_child(_pet_visual)
+		_pet_visual.setup(pet.pet_id)
+		pet.triggered.connect(_on_pet_triggered)
 	PlayerData.equipment_changed.connect(_on_equipment_changed)
 
 
-func _on_equipment_changed(_slot: String) -> void:
-	if remote_input == null:
-		model.apply_equipped()
+func _on_equipment_changed(slot: String) -> void:
+	if remote_input != null:
+		return
+	model.apply_equipped()
+	if _pet_visual != null and slot == "pet":
+		_pet_visual.setup(pet.pet_id)
+
+
+func _on_pet_triggered(_pet_id: String, _center: Vector3) -> void:
+	if _pet_visual != null:
+		_pet_visual.pulse()
+
+
+# Combined passive multiplier from the character and the pet, clamped to safe limits.
+func modifier(key: String) -> float:
+	var value := 1.0
+	if skill != null:
+		value *= float(skill.passive().get(key, 1.0))
+	if pet != null:
+		value *= float(pet.passive().get(key, 1.0))
+	if key == "attack_interval" and _haste_time > 0.0:
+		value *= _haste_factor
+	return PassiveLimits.clamp_value(key, value)
 
 
 # Returns the input for this physics frame. A server-controlled player reads
@@ -106,14 +148,14 @@ func ragdoll_transform() -> Transform3D:
 
 
 func apply_hit(hit: Dictionary) -> void:
-	if state != State.NORMAL:
+	if state != State.NORMAL or invulnerable_remaining > 0.0:
 		return
 	var attacker: Variant = hit.get("attacker")
 	if attacker is PlayerController and attacker != self:
 		last_attacker = attacker as PlayerController
 		_last_hit_msec = Time.get_ticks_msec()
 	var guarding := guard_remaining > 0.0
-	var impulse := CombatResolver.victim_impulse(hit, damage_percent, guarding)
+	var impulse := CombatResolver.victim_impulse(hit, damage_percent, guarding) * modifier("knockback_taken")
 	damage_percent += CombatResolver.victim_damage(hit, guarding)
 	damage_changed.emit(damage_percent)
 	apply_knockback(impulse)
@@ -128,7 +170,28 @@ func apply_knockback(impulse: Vector3) -> void:
 		_enter_ragdoll(total)
 	else:
 		velocity = total
-		_hitstun = clampf(impulse.length() * 0.06, 0.15, 0.6)
+		_hitstun = clampf(impulse.length() * 0.06, 0.15, 0.6) * modifier("hitstun")
+
+
+func apply_slow(factor: float, duration: float) -> void:
+	_slow_factor = clampf(factor, 0.2, 1.0)
+	_slow_time = maxf(_slow_time, duration)
+
+
+func apply_haste(factor: float, duration: float) -> void:
+	_haste_factor = clampf(factor, 0.6, 1.0)
+	_haste_time = maxf(_haste_time, duration)
+
+
+func dash_burst(direction: Vector3, speed: float, duration: float, immune: float) -> void:
+	if state != State.NORMAL or direction.length() < 0.01:
+		return
+	var flat := Vector3(direction.x, 0.0, direction.z).normalized()
+	velocity.x = flat.x * speed
+	velocity.z = flat.z * speed
+	_dash_time = duration
+	invulnerable_remaining = maxf(invulnerable_remaining, immune)
+	face(flat)
 
 
 func launch(boost: Vector3) -> void:
@@ -145,7 +208,10 @@ func respawn() -> void:
 	velocity = Vector3.ZERO
 	_dash_time = 0.0
 	_hitstun = 0.0
+	_slow_time = 0.0
+	_haste_time = 0.0
 	guard_remaining = 0.0
+	invulnerable_remaining = 0.0
 	damage_percent = 0.0
 	last_attacker = null
 	_gravity_sources.clear()
@@ -161,6 +227,9 @@ func _physics_process(delta: float) -> void:
 		return
 	_dash_cooldown = maxf(_dash_cooldown - delta, 0.0)
 	guard_remaining = maxf(guard_remaining - delta, 0.0)
+	invulnerable_remaining = maxf(invulnerable_remaining - delta, 0.0)
+	_slow_time = maxf(_slow_time - delta, 0.0)
+	_haste_time = maxf(_haste_time - delta, 0.0)
 	_hitstun = maxf(_hitstun - delta, 0.0)
 	var input := Vector2.ZERO
 	var jump_pressed := false
@@ -189,8 +258,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _apply_movement(direction: Vector3, delta: float, jump_pressed: bool) -> void:
-	var accel := GROUND_ACCEL if is_on_floor() else AIR_ACCEL
-	var target := direction * WALK_SPEED
+	var accel := GROUND_ACCEL if is_on_floor() else AIR_ACCEL * modifier("air_accel")
+	var speed_scale := _slow_factor if _slow_time > 0.0 else 1.0
+	var target := direction * WALK_SPEED * speed_scale * modifier("walk_speed")
 	if _hitstun > 0.0:
 		var drag := 8.0 if is_on_floor() else 2.0
 		velocity.x = move_toward(velocity.x, 0.0, drag * delta)
@@ -200,11 +270,14 @@ func _apply_movement(direction: Vector3, delta: float, jump_pressed: bool) -> vo
 		velocity.z = move_toward(velocity.z, target.z, accel * delta)
 	if is_on_floor() and velocity.y <= 0.0:
 		if jump_pressed:
-			velocity.y = JUMP_VELOCITY
+			velocity.y = JUMP_VELOCITY * modifier("jump")
 		else:
 			velocity.y = 0.0
 	else:
-		velocity.y -= GRAVITY * gravity_scale() * delta
+		var pull := GRAVITY * gravity_scale() * modifier("gravity")
+		if velocity.y < 0.0:
+			pull *= modifier("fall_gravity")
+		velocity.y -= pull * delta
 
 
 func _start_dash(direction: Vector3) -> void:
@@ -261,7 +334,10 @@ func _process_ragdoll(delta: float) -> void:
 	if torso.y < KILL_Y:
 		_fall_out()
 		return
-	if _ragdoll_time >= RAGDOLL_MAX_TIME or (_ragdoll_time >= RAGDOLL_MIN_TIME and _ragdoll.is_settled()):
+	var scale := modifier("ragdoll_time")
+	var min_time := RAGDOLL_MIN_TIME * scale
+	var max_time := RAGDOLL_MAX_TIME * scale
+	if _ragdoll_time >= max_time or (_ragdoll_time >= min_time and _ragdoll.is_settled()):
 		_dispose_ragdoll()
 		global_position = torso
 		velocity = Vector3.ZERO

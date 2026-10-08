@@ -2,7 +2,7 @@ extends Control
 
 const GREEN := Color("#2ecc71")
 const GRAY := Color("#4a5068")
-const SIZE_LABELS := {2: "1v1", 4: "2v2", 6: "3v3"}
+const SIZE_LABELS := {2: "1v1", 4: "2v2", 6: "3v3", 8: "4v4", 10: "5v5", 12: "6v6", 14: "7v7"}
 const TIMER_OPTIONS := [["1 min", 60], ["2 min", 120], ["3 min", 180], ["5 min", 300], ["10 min", 600], ["15 min", 900], ["30 min", 1800]]
 const STOCK_OPTIONS := [["1", 1], ["2", 2], ["3", 3], ["5", 5], ["9", 9]]
 
@@ -158,7 +158,7 @@ func _show_menu() -> void:
 	var sizes := HBoxContainer.new()
 	sizes.add_theme_constant_override("separation", 8)
 	var group := ButtonGroup.new()
-	for size_value in [2, 4, 6]:
+	for size_value in GameConfig.CUSTOM_ROOM_SIZES:
 		var button := Button.new()
 		button.text = String(SIZE_LABELS[size_value])
 		button.toggle_mode = true

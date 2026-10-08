@@ -33,7 +33,7 @@ func _ready() -> void:
 	add_child(_top_panel)
 	_leave_button = Button.new()
 	_leave_button.text = "Leave"
-	_leave_button.pressed.connect(func() -> void: leave_requested.emit())
+	_leave_button.pressed.connect(_on_leave_pressed)
 	add_child(_leave_button)
 	_feed = VBoxContainer.new()
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -53,10 +53,8 @@ func _ready() -> void:
 	_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_banner)
 	state.clock_changed.connect(_on_clock)
-	state.scores_changed.connect(func(_scores: Dictionary) -> void: _refresh_scores())
-		state.participant_changed.connect(func(_peer_id: int) -> void:
-		_refresh_stocks()
-		_refresh_scores())
+	state.scores_changed.connect(_on_scores_changed)
+	state.participant_changed.connect(_on_participant_changed)
 	state.player_knocked_out.connect(_on_knockout)
 	get_viewport().size_changed.connect(_layout)
 	_on_clock(state.clock)
@@ -72,6 +70,19 @@ func _make_label(font_size: int, color: Color) -> Label:
 	label.add_theme_font_size_override("font_size", font_size)
 	label.add_theme_color_override("font_color", color)
 	return label
+
+
+func _on_leave_pressed() -> void:
+	leave_requested.emit()
+
+
+func _on_scores_changed(_scores: Dictionary) -> void:
+	_refresh_scores()
+
+
+func _on_participant_changed(_peer_id: int) -> void:
+	_refresh_stocks()
+	_refresh_scores()
 
 
 func _layout() -> void:

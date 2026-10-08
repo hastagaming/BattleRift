@@ -18,12 +18,9 @@ const SKIN_COLORS := {
 	"ember": Color("#ff7a4d"),
 	"shadow": Color("#5b5472"),
 }
-const CHARACTER_ACCENTS := {
-	"rifter": Color("#38e8c6"),
-	"vanguard": Color("#ff5a5f"),
-}
 const EMOTES: Array[String] = ["wave", "spin", "cheer"]
 const HOLD_ANGLE := 1.1
+const ACCESSORY_SLOTS: Array[String] = ["head", "face", "body", "back"]
 
 var skin_color: Color = Color("#d9a273")
 var accent_color: Color = Color("#38e8c6")
@@ -37,14 +34,12 @@ var _arm_right: Node3D
 var _leg_left: Node3D
 var _leg_right: Node3D
 var _weapon_holder: Node3D
+var _extras: Node3D
+var _accessory_nodes: Dictionary = {}
+var _appearance_locked: bool = false
 var _phase: float = 0.0
 var _hold_offset: float = 0.0
 var _emoting: bool = false
-var _appearance_locked: bool = false
-
-const ACCESSORY_SLOTS: Array[String] = ["head", "face", "body", "back"]
-
-var _accessory_nodes: Dictionary = {}
 var _attacking: bool = false
 var _emote_tween: Tween
 var _attack_tween: Tween
@@ -124,11 +119,16 @@ func apply_appearance(skin_id: String, character_id: String, accessories: Dictio
 
 
 func _paint(skin_id: String, character_id: String) -> void:
+	var character := character_id if CharacterDb.has(character_id) else "rifter"
 	skin_color = SKIN_COLORS.get(skin_id, SKIN_COLORS["default"])
-	accent_color = CHARACTER_ACCENTS.get(character_id, CHARACTER_ACCENTS["rifter"])
+	accent_color = CharacterDb.color_of(character)
 	_skin_material.albedo_color = skin_color
 	_accent_material.albedo_color = accent_color
 	_pants_material.albedo_color = accent_color.darkened(0.55)
+	if _extras != null:
+		_extras.queue_free()
+	_extras = CharacterExtras.build(character)
+	add_child(_extras)
 
 
 func _set_accessories(items: Dictionary) -> void:

@@ -10,7 +10,7 @@ const TIERS: Array[Dictionary] = [
 	{"id": "master", "name": "Master", "min_mmr": 2500},
 	{"id": "rift", "name": "Rift", "min_mmr": 2800},
 ]
-const CONTEXTS: Array[String] = ["1v1", "2v2", "3v3", "battle_royal"]
+const CONTEXTS: Array[String] = ["1v1", "2v2", "3v3", "4v4", "5v5", "6v6", "7v7", "battle_royal"]
 const DEFAULT_MMR := 800
 const MAX_MMR := 4000
 
