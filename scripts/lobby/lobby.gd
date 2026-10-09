@@ -32,6 +32,7 @@ func _ready() -> void:
 	PlayerData.signed_out.connect(_on_signed_out)
 	Economy.balance_changed.connect(_on_balance_changed)
 	PartyService.state_changed.connect(_on_party_changed)
+    PartyService.state_changed.connect(_on_party_changed)
 	get_viewport().size_changed.connect(_layout_ui)
 	_refresh_ui()
 	_layout_ui()
@@ -237,6 +238,7 @@ func _build_ui() -> void:
 	var entries := [
 		["Play", Router.PLAY],
 		["Social", Router.SOCIAL],
+        ["Clan", Router.CLAN],
 		["Missions", Router.MISSIONS],
 		["Shop", Router.SHOP],
 		["Inventory", Router.INVENTORY],
@@ -247,7 +249,7 @@ func _build_ui() -> void:
 	for entry in entries:
 		var menu_button := Button.new()
 		menu_button.text = String(entry[0])
-		menu_button.custom_minimum_size = Vector2(110.0, 52.0)
+		menu_button.custom_minimum_size = Vector2(96.0, 52.0)
 		menu_button.pressed.connect(Router.go.bind(String(entry[1])))
 		menu_row.add_child(menu_button)
 		if String(entry[0]) == "Social":
@@ -289,10 +291,14 @@ func _refresh_ui() -> void:
 	if not PlayerData.is_signed_in or _name_label == null:
 		return
 	var profile: Dictionary = PlayerData.data["profile"]
-	_name_label.text = "%s  Lv %d" % [String(profile["name"]), int(profile["level"])]
+	_name_label.text = "%s%s  Lv %d" % [ClanService.tag_prefix(), String(profile["name"]), int(profile["level"])]
 	_rank_label.text = _best_rank_text()
 	_cr_label.text = "CR %d" % Economy.balance(Economy.CR)
 	_br_label.text = "BR %d" % Economy.balance(Economy.BR)
+
+
+func _on_clan_changed(_state: Dictionary) -> void:
+	_refresh_ui()
 
 
 func _on_party_changed(state: Dictionary) -> void:

@@ -25,6 +25,7 @@ func _initialize() -> void:
 	_test_pets()
 	_test_characters()
 	_test_room_sizes()
+	_test_clan_rules()
 	print("Finished with %d failure(s)" % _failures)
 	quit(1 if _failures > 0 else 0)
 
@@ -217,18 +218,25 @@ func _snapshot(t: float, x: float, flags: int) -> Dictionary:
 func _test_snapshot_buffer() -> void:
 	var buffer := SnapshotBuffer.new()
 	buffer.push(_snapshot(1.0, 0.0, SnapshotCodec.FLAG_ACTIVE), 1.0)
-	buffer.push(_snapshot(2.0, 10.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
+	buffer.push(_snapshot(2.0, 4.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
 	var middle := buffer.sample(1.5 + SnapshotBuffer.INTERP_DELAY)
 	var middle_record := SnapshotCodec.read_player(middle["p"], 0)
 	var middle_position: Vector3 = middle_record["pos"]
-	_check(absf(middle_position.x - 5.0) < 0.01, "positions are interpolated between two snapshots")
+	_check(absf(middle_position.x - 2.0) < 0.01, "positions are interpolated between two snapshots")
+	var far_buffer := SnapshotBuffer.new()
+	far_buffer.push(_snapshot(1.0, 0.0, SnapshotCodec.FLAG_ACTIVE), 1.0)
+	far_buffer.push(_snapshot(2.0, 10.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
+	var far := far_buffer.sample(1.5 + SnapshotBuffer.INTERP_DELAY)
+	var far_record := SnapshotCodec.read_player(far["p"], 0)
+	var far_position: Vector3 = far_record["pos"]
+	_check(absf(far_position.x - 10.0) < 0.01, "a jump of more than six meters snaps instead of sliding")
 	var teleport_buffer := SnapshotBuffer.new()
 	teleport_buffer.push(_snapshot(1.0, 0.0, 0), 1.0)
-	teleport_buffer.push(_snapshot(2.0, 10.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
+	teleport_buffer.push(_snapshot(2.0, 4.0, SnapshotCodec.FLAG_ACTIVE), 2.0)
 	var jump := teleport_buffer.sample(1.5 + SnapshotBuffer.INTERP_DELAY)
 	var jump_record := SnapshotCodec.read_player(jump["p"], 0)
 	var jump_position: Vector3 = jump_record["pos"]
-	_check(absf(jump_position.x - 10.0) < 0.01, "an inactive player snaps instead of sliding across the arena")
+	_check(absf(jump_position.x - 4.0) < 0.01, "an inactive player snaps instead of sliding across the arena")
 
 
 func _test_reward_rules() -> void:
@@ -356,4 +364,29 @@ func _test_room_sizes() -> void:
 	config.free()
 	var rank: Node = load("res://scripts/rank/rank_system.gd").new()
 	_check(rank.is_valid_context("7v7") and rank.new_ratings().has("5v5"), "ratings exist for every team size")
+	rank.free()
+
+
+func _test_clan_rules() -> void:
+	_check(ClanRules.valid_name("Rift Wolves") and ClanRules.valid_name("A_b-1"), "normal clan names are accepted")
+	_check(not ClanRules.valid_name("ab") and not ClanRules.valid_name("this name is far too long to use") and not ClanRules.valid_name("bad!name"), "invalid clan names are rejected")
+	_check(ClanRules.valid_tag("RFT") and ClanRules.valid_tag("A1"), "normal clan tags are accepted")
+	_check(not ClanRules.valid_tag("R") and not ClanRules.valid_tag("TOOLONG") and not ClanRules.valid_tag("R F"), "invalid clan tags are rejected")
+	_check(ClanRules.capacity_for_level(1) == 100 and ClanRules.capacity_for_level(2) == 110, "a new clan holds 100 members and grows with its level")
+	_check(ClanRules.capacity_for_level(11) == 200 and ClanRules.capacity_for_level(ClanRules.MAX_LEVEL) == 200, "clan capacity never goes above 200")
+	_check(ClanRules.xp_needed(2) > ClanRules.xp_needed(1), "higher clan levels need more xp")
+	_check(ClanRules.requirements_text({}) == "Open to everyone", "no requirements means an open clan")
+	var gold := ClanRules.build_requirements("gold", 10, 0, true)
+	_check(gold.size() == 3 and bool(gold["approval"]) and int(gold["min_br"]) == 10, "requirements are built from the form values")
+	_check(ClanRules.build_requirements("", 0, 0, false).is_empty(), "empty form values give no requirements")
+	_check(ClanRules.build_requirements("nonsense", 0, 0, false).is_empty(), "an unknown rank is dropped")
+	var text := ClanRules.requirements_text(gold)
+	_check(text.contains("Gold") and text.contains("10 BR") and text.contains("Approval"), "requirements are described in plain text")
+	var rank: Node = load("res://scripts/rank/rank_system.gd").new()
+	var tiers: Array = rank.get("TIERS")
+	var same := tiers.size() == ClanRules.TIER_IDS.size()
+	for i in mini(tiers.size(), ClanRules.TIER_IDS.size()):
+		if String((tiers[i] as Dictionary)["id"]) != ClanRules.TIER_IDS[i]:
+			same = false
+	_check(same, "clan rank requirements use the same tiers as the rank system")
 	rank.free()

@@ -680,6 +680,7 @@ func _compute_rewards(final_result: Dictionary) -> Dictionary:
 
 func _persist(final_result: Dictionary, rewards: Dictionary, changes: Dictionary) -> bool:
 	var rows: Dictionary = final_result["participants"]
+	var queue_type := String(room.get("queue_type", "custom"))
 	var entries: Array = []
 	for slot in _slots:
 		var row: Dictionary = rows.get(slot, {})
@@ -692,6 +693,7 @@ func _persist(final_result: Dictionary, rewards: Dictionary, changes: Dictionary
 			"cr": int(reward["cr"]),
 			"xp": int(reward["xp"]),
 			"duration": 0 if bool(row.get("forfeited", false)) else int(float(final_result.get("duration", 0.0))),
+			"queue_type": queue_type,
 		}
 		if changes.has(slot):
 			entry["rating_context"] = String(room.get("context", ""))
