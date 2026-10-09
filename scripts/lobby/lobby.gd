@@ -32,7 +32,7 @@ func _ready() -> void:
 	PlayerData.signed_out.connect(_on_signed_out)
 	Economy.balance_changed.connect(_on_balance_changed)
 	PartyService.state_changed.connect(_on_party_changed)
-    PartyService.state_changed.connect(_on_party_changed)
+	ClanService.state_changed.connect(_on_clan_changed)
 	get_viewport().size_changed.connect(_layout_ui)
 	_refresh_ui()
 	_layout_ui()
@@ -238,7 +238,7 @@ func _build_ui() -> void:
 	var entries := [
 		["Play", Router.PLAY],
 		["Social", Router.SOCIAL],
-        ["Clan", Router.CLAN],
+		["Clan", Router.CLAN],
 		["Missions", Router.MISSIONS],
 		["Shop", Router.SHOP],
 		["Inventory", Router.INVENTORY],

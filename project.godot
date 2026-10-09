@@ -20,7 +20,7 @@ Supabase="*res://scripts/backend/supabase_client.gd"
 AuthService="*res://scripts/auth/auth_service.gd"
 AppNotify="*res://scripts/core/app_notify.gd"
 PartyService="*res://scripts/core/party_service.gd"
-const CLAN := "res://scenes/clan/clan.tscn"
+ClanService="*res://scripts/core/clan_service.gd"
 
 [editor_plugins]
 
