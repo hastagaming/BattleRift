@@ -55,18 +55,32 @@ jobs:
           mkdir -p "$TEMPLATE_DIR"
           unzip -q templates.tpz -d "$TEMPLATE_DIR"
           mv "$TEMPLATE_DIR/templates" "$TEMPLATE_DIR/${GODOT_VERSION}.stable"
+          test -f "$TEMPLATE_DIR/${GODOT_VERSION}.stable/android_source.zip"
 
-      - name: Configure Godot for Android
+      - name: Create keystores
         run: |
-          mkdir -p "$HOME/.config/godot"
-          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' "$ANDROID_SDK_ROOT" "$JAVA_HOME" > "$HOME/.config/godot/editor_settings-${GODOT_VERSION}.tres"
-
-      - name: Create temporary build keystore
-        run: |
+          keytool -genkeypair -keystore "$HOME/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 9999 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
           keytool -genkeypair -keystore "$RUNNER_TEMP/build.jks" -alias build -keyalg RSA -keysize 2048 -validity 1 -storepass buildpass -keypass buildpass -dname "CN=BattleRift CI"
           echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/build.jks" >> "$GITHUB_ENV"
           echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=build" >> "$GITHUB_ENV"
           echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=buildpass" >> "$GITHUB_ENV"
+
+      - name: Configure Godot for Android
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          printf '%s\n' \
+            '[gd_resource type="EditorSettings" format=3]' \
+            '' \
+            '[resource]' \
+            "export/android/android_sdk_path = \"$ANDROID_SDK_ROOT\"" \
+            "export/android/java_sdk_path = \"$JAVA_HOME\"" \
+            "export/android/debug_keystore = \"$HOME/debug.keystore\"" \
+            'export/android/debug_keystore_user = "androiddebugkey"' \
+            'export/android/debug_keystore_pass = "android"' \
+            'export/android/force_system_user = false' \
+            'export/android/shutdown_adb_on_exit = false' \
+            'export/android/timestamping_authority_url = ""' \
+            > "$HOME/.config/godot/editor_settings-${GODOT_VERSION}.tres"
 
       - name: Run logic tests
         run: |
@@ -83,16 +97,56 @@ jobs:
 
       - name: Install Android build template
         run: |
+          rm -rf android
           mkdir -p android/build
           unzip -q -o "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" -d android/build
           touch android/build/.gdignore
           printf '%s' "${GODOT_VERSION}.stable" > android/.build_version
+          test -f android/build/build.gradle || { echo "build.gradle is missing from the Android template"; exit 1; }
+          test -f android/.build_version
+          grep -q 'use_gradle_build=true' export_presets.cfg || { echo "export_presets.cfg must contain gradle_build/use_gradle_build=true"; exit 1; }
+
+      - name: Android diagnostics
+        run: |
+          echo "Godot: $(godot --version)"
+          echo "Java: $(java -version 2>&1 | head -n1)"
+          echo "SDK: $ANDROID_SDK_ROOT"
+          for dir in platform-tools build-tools platforms cmdline-tools ndk cmake; do
+            echo "--- $dir"
+            ls "$ANDROID_SDK_ROOT/$dir" 2>&1 | head -n 8
+          done
+          echo "--- cmdline-tools/latest"
+          head -n 3 "$ANDROID_SDK_ROOT/cmdline-tools/latest/source.properties" 2>&1
+          echo "--- templates"
+          ls "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable" | head -n 40
+          echo "--- android template"
+          ls android android/build | head -n 30
+          echo "build_version: $(cat android/.build_version)"
+          echo "--- preset"
+          grep -nE 'use_gradle_build|export_format|unique_name|version/|keystore' export_presets.cfg
+          echo "--- editor settings"
+          cat "$HOME/.config/godot/editor_settings-${GODOT_VERSION}.tres"
+          echo "--- keystore env"
+          echo "release keystore: ${GODOT_ANDROID_KEYSTORE_RELEASE_PATH} (exists: $(test -f "$GODOT_ANDROID_KEYSTORE_RELEASE_PATH" && echo yes || echo no))"
 
       - name: Export APK
         run: |
+          set -o pipefail
           mkdir -p build
-          godot --headless --export-release "Android" build/BattleRift.apk
+          godot --headless --verbose --export-release "Android" build/BattleRift.apk 2>&1 | tee export.log
           test -f build/BattleRift.apk
+
+      - name: Show the end of the export log
+        if: failure()
+        run: tail -n 120 export.log || true
+
+      - name: Upload the export log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-log
+          path: export.log
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
