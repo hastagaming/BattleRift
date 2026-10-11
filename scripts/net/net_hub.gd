@@ -2,7 +2,7 @@ class_name NetHub
 extends Node
 
 # Server side: signals emitted when a client calls an RPC.
-signal auth_received(peer_id: int, token: String)
+signal auth_received(peer_id: int, token: String, protocol: int)
 signal weapon_received(peer_id: int, weapon_id: String)
 signal input_received(peer_id: int, seq: int, move_x: float, move_y: float, yaw: float, pitch: float, held: bool)
 signal action_received(peer_id: int, action: int)
@@ -20,9 +20,9 @@ signal abort_received(reason: String)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func srv_auth(token: String) -> void:
+func srv_auth(token: String, protocol: int) -> void:
 	if multiplayer.is_server():
-		auth_received.emit(multiplayer.get_remote_sender_id(), token)
+		auth_received.emit(multiplayer.get_remote_sender_id(), token, protocol)
 
 
 @rpc("any_peer", "call_remote", "reliable")

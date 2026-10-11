@@ -4,10 +4,16 @@ const DEFAULT_PORT := 7777
 const MAX_PEERS := 48
 const AUTH_TIMEOUT := 10.0
 const MAX_TOKEN_LENGTH := 4096
+const PEER_TIMEOUT_LIMIT := 32
+const PEER_TIMEOUT_MIN_MSEC := 5000
+const PEER_TIMEOUT_MAX_MSEC := 10000
 
 var hub: NetHub
 var admin: SupabaseAdmin
+var beacon: LanBeacon
 var port: int = DEFAULT_PORT
+var bind_ip: String = "0.0.0.0"
+var discovery: bool = true
 var max_matches: int = 4
 var dev_accounts: bool = false
 var dev_capacity: int = 2
@@ -41,9 +47,10 @@ func _ready() -> void:
 	hub.action_received.connect(_on_action)
 	hub.leave_received.connect(_on_leave)
 	var peer := ENetMultiplayerPeer.new()
+	peer.set_bind_ip(bind_ip)
 	var error := peer.create_server(port, MAX_PEERS)
 	if error != OK:
-		push_error("Could not listen on UDP port %d (error %d)" % [port, error])
+		push_error("Could not listen on UDP %s:%d (error %d). Is another server already running on this port?" % [bind_ip, port, error])
 		get_tree().quit(1)
 		return
 	multiplayer.multiplayer_peer = peer
@@ -52,7 +59,25 @@ func _ready() -> void:
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	NetBus.blast_hook = _route_blast
 	NetBus.beam_hook = _route_beam
-	print("BattleRift server listening on UDP %d (max matches: %d)" % [port, max_matches])
+	if discovery:
+		beacon = LanBeacon.new()
+		beacon.game_port = port
+		add_child(beacon)
+		beacon.start()
+	_print_banner()
+
+
+func _print_banner() -> void:
+	print("BattleRift server (Godot %s, protocol %d)" % [String(Engine.get_version_info().get("string", "?")), NetProtocol.VERSION])
+	print("Listening on UDP %s:%d" % [bind_ip, port])
+	var addresses := NetAddress.lan_ipv4_addresses()
+	if addresses.is_empty():
+		print("No LAN IPv4 address was found. Connect the laptop to the Wi-Fi first.")
+	for address in addresses:
+		print("  Phones: Settings > Match server > %s:%d" % [address, port])
+	if beacon != null:
+		print("LAN discovery answers on UDP %d" % NetProtocol.DISCOVERY_PORT)
+	print("Allow UDP %d and UDP %d in the laptop firewall." % [port, NetProtocol.DISCOVERY_PORT])
 
 
 func _setting(env_name: String, project_key: String) -> String:
@@ -71,6 +96,12 @@ func _read_options() -> void:
 		options[body.get_slice("=", 0)] = body.get_slice("=", 1) if body.contains("=") else "true"
 	var env_port := OS.get_environment("BATTLERIFT_PORT")
 	port = int(options.get("port", env_port if not env_port.is_empty() else str(DEFAULT_PORT)))
+	var wanted_bind := String(options.get("bind", "0.0.0.0"))
+	if wanted_bind.is_valid_ip_address():
+		bind_ip = wanted_bind
+	else:
+		push_warning("--bind=%s is not a valid IP address. Using 0.0.0.0." % wanted_bind)
+	discovery = not options.has("no-discovery")
 	max_matches = clampi(int(options.get("max-matches", "4")), 1, 32)
 	dev_accounts = options.has("dev-accounts")
 	var capacity := int(options.get("dev-capacity", "2"))
@@ -84,6 +115,7 @@ func _process(delta: float) -> void:
 	for peer_id in _peers.keys():
 		var info: Dictionary = _peers[peer_id]
 		if String(info["state"]) == "connected" and _clock - float(info["since"]) > AUTH_TIMEOUT:
+			print("[server] peer %d did not sign in in time and was disconnected" % int(peer_id))
 			_disconnect_peer(peer_id)
 
 
@@ -95,6 +127,12 @@ func _disconnect_peer(peer_id: int) -> void:
 
 func _on_peer_connected(peer_id: int) -> void:
 	_peers[peer_id] = {"state": "connected", "since": _clock, "match": null}
+	var enet_peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet_peer != null:
+		var packet_peer := enet_peer.get_peer(peer_id)
+		if packet_peer != null:
+			packet_peer.set_timeout(PEER_TIMEOUT_LIMIT, PEER_TIMEOUT_MIN_MSEC, PEER_TIMEOUT_MAX_MSEC)
+	print("[server] peer %d connected (%d connected)" % [peer_id, _peers.size()])
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
@@ -102,6 +140,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	if instance != null:
 		instance.remove_peer(peer_id)
 	_peers.erase(peer_id)
+	print("[server] peer %d disconnected (%d connected)" % [peer_id, _peers.size()])
 
 
 func _match_of(peer_id: int) -> ServerMatch:
@@ -115,15 +154,19 @@ func _match_of(peer_id: int) -> ServerMatch:
 func _reject(peer_id: int, message: String) -> void:
 	if not _peers.has(peer_id):
 		return
+	print("[server] peer %d rejected: %s" % [peer_id, message])
 	hub.rpc_id(peer_id, "cl_auth_result", false, message)
 	await get_tree().create_timer(0.3).timeout
 	if _peers.has(peer_id):
 		_disconnect_peer(peer_id)
 
 
-func _on_auth(peer_id: int, token: String) -> void:
+func _on_auth(peer_id: int, token: String, protocol: int) -> void:
 	var info: Dictionary = _peers.get(peer_id, {})
 	if info.is_empty() or String(info["state"]) != "connected":
+		return
+	if protocol != NetProtocol.VERSION:
+		_reject(peer_id, "This app and the server use different versions (app %d, server %d). Update both to the same build." % [protocol, NetProtocol.VERSION])
 		return
 	if token.is_empty() or token.length() > MAX_TOKEN_LENGTH:
 		_reject(peer_id, "Invalid token")
@@ -148,6 +191,7 @@ func _on_auth(peer_id: int, token: String) -> void:
 		return
 	info["state"] = "ready"
 	info["match"] = instance
+	print("[server] %s signed in (peer %d, match %s)" % [String(identity["name"]), peer_id, match_key])
 
 
 func _identify(token: String) -> Dictionary:
@@ -227,7 +271,7 @@ func _create_match(match_key: String, identity: Dictionary) -> ServerMatch:
 	instance.finished.connect(_on_match_finished.bind(match_key))
 	add_child(instance)
 	_matches[match_key] = instance
-	print("Match %s created (%d players)" % [match_key, int(identity["room"].get("capacity", 2))])
+	print("[server] match %s created (%d players)" % [match_key, int(identity["room"].get("capacity", 2))])
 	return instance
 
 
@@ -242,7 +286,7 @@ func _on_match_finished(match_key: String) -> void:
 			info["match"] = null
 		_disconnect_peer(peer_id)
 	instance.queue_free()
-	print("Match %s closed" % match_key)
+	print("[server] match %s closed" % match_key)
 
 
 func _on_weapon(peer_id: int, weapon_id: String) -> void:

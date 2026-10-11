@@ -4,6 +4,9 @@ const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch"
 const ACTION_MAP := [["jump", 1], ["dash", 2], ["attack", 4], ["weapon_switch", 8], ["emote", 16], ["pet_ability", 32], ["ability", 64]]
 const CONNECT_TIMEOUT := 12.0
 const INPUT_EVERY := 2
+const PEER_TIMEOUT_LIMIT := 32
+const PEER_TIMEOUT_MIN_MSEC := 5000
+const PEER_TIMEOUT_MAX_MSEC := 10000
 
 var hub: NetHub
 var mirror: MatchState
@@ -25,6 +28,8 @@ var _pets: Dictionary = {}
 var _characters: Dictionary = {}
 var _projectiles: Dictionary = {}
 var _token: String = ""
+var _host: String = ""
+var _port: int = 0
 var _connected: bool = false
 var _setup_done: bool = false
 var _ended: bool = false
@@ -102,6 +107,13 @@ func _fail(message: String) -> void:
 	_set_status(message, true)
 
 
+func _close_peer() -> void:
+	var peer := multiplayer.multiplayer_peer
+	if peer != null:
+		peer.close()
+	multiplayer.multiplayer_peer = null
+
+
 func _session_token() -> String:
 	if NetSession.dev:
 		var base_name := String(PlayerData.data["profile"]["name"]).left(16)
@@ -113,45 +125,59 @@ func _session_token() -> String:
 
 
 func _connect() -> void:
-	_set_status("Connecting to the match server...", false)
+	var address := NetConfig.current()
+	_host = String(address["host"])
+	_port = int(address["port"])
+	_set_status("Connecting to %s:%d ..." % [_host, _port], false)
 	_token = await _session_token()
 	if _token.is_empty():
 		_fail("Could not read your session. Sign in again.")
 		return
-	var address := NetSession.server_address()
 	var peer := ENetMultiplayerPeer.new()
-	var error := peer.create_client(String(address["host"]), int(address["port"]))
+	var error := peer.create_client(_host, _port)
 	if error != OK:
-		_fail("Could not start the connection (error %d)." % error)
+		_fail("Could not start the connection to %s:%d (error %d). Check the address in Settings > Match server." % [_host, _port, error])
 		return
 	multiplayer.multiplayer_peer = peer
 	await get_tree().create_timer(CONNECT_TIMEOUT).timeout
-	if not _connected and not _leaving:
-		_fail("Could not reach the match server.")
+	if not _connected and not _leaving and not _ended:
+		_close_peer()
+		_fail(NetAddress.unreachable_message(_host, _port, OS.get_name() == "Android"))
 
 
 func _on_connected() -> void:
 	_connected = true
-	_set_status("Signing in to the match...", false)
-	hub.rpc_id(1, "srv_auth", _token)
+	var enet_peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet_peer != null:
+		var packet_peer := enet_peer.get_peer(1)
+		if packet_peer != null:
+			packet_peer.set_timeout(PEER_TIMEOUT_LIMIT, PEER_TIMEOUT_MIN_MSEC, PEER_TIMEOUT_MAX_MSEC)
+	_set_status("Connected to %s:%d. Signing in..." % [_host, _port], false)
+	hub.rpc_id(1, "srv_auth", _token, NetProtocol.VERSION)
 	_token = ""
 
 
 func _on_connection_failed() -> void:
-	_fail("Could not reach the match server.")
+	if _leaving or _ended:
+		return
+	_close_peer()
+	_fail(NetAddress.unreachable_message(_host, _port, OS.get_name() == "Android"))
 
 
 func _on_server_disconnected() -> void:
 	if _ended or _leaving:
 		return
-	_fail("Connection to the match server was lost.")
+	if _setup_done:
+		_fail("Lost the connection to the match server (%s:%d)." % [_host, _port])
+	else:
+		_fail("The server closed the connection before the match started.")
 
 
 func _on_auth_result(ok: bool, error: String) -> void:
 	if not ok:
 		_fail(error)
 		return
-	_set_status("Waiting for the other players...", false)
+	_set_status("Signed in. Waiting for the other players...", false)
 
 
 func _on_abort(reason: String) -> void:
@@ -161,6 +187,24 @@ func _on_abort(reason: String) -> void:
 
 func _on_editor_toggled(open: bool) -> void:
 	_editing = open
+
+
+func _show_gather(data: Dictionary) -> void:
+	if _setup_done:
+		return
+	var players: Array = data.get("players", [])
+	var present := 0
+	var lines: Array[String] = []
+	for entry in players:
+		var info: Dictionary = entry
+		var here := bool(info.get("connected", false))
+		if here:
+			present += 1
+		lines.append("%s  -  %s" % [String(info.get("name", "?")), "connected" if here else "waiting..."])
+	var text := "Waiting for players  (%d / %d)" % [present, int(data.get("expected", players.size()))]
+	if not lines.is_empty():
+		text += "\n" + "\n".join(lines)
+	_set_status(text, false)
 
 
 func _on_setup(data: Dictionary) -> void:
@@ -273,9 +317,13 @@ func _on_state(data: Dictionary) -> void:
 
 
 func _on_event(data: Dictionary) -> void:
+	var event_type := String(data.get("type", ""))
+	if event_type == "gather":
+		_show_gather(data)
+		return
 	if not _setup_done:
 		return
-	match String(data.get("type", "")):
+	match event_type:
 		"countdown":
 			var seconds_left := int(data["n"])
 			if seconds_left > 0:
@@ -341,10 +389,7 @@ func _exit_to_lobby() -> void:
 	PartyService.suppress_launch(12.0)
 	_leave_button.disabled = true
 	_set_status("Leaving...", false)
-	var peer := multiplayer.multiplayer_peer
-	if peer != null:
-		peer.close()
-	multiplayer.multiplayer_peer = null
+	_close_peer()
 	if PlayerData.remote:
 		await Supabase.call_rpc("leave_room")
 		await PlayerData.refresh_remote()
@@ -421,13 +466,13 @@ func _apply_projectiles(data: PackedFloat32Array) -> void:
 			node = ProjectileVisual.build(WeaponDb.ORDER[kind])
 			add_child(node)
 			_projectiles[id] = node
-		var position: Vector3 = record["pos"]
+		var world_position: Vector3 = record["pos"]
 		var velocity: Vector3 = record["vel"]
-		node.global_position = position
+		node.global_position = world_position
 		if velocity.length() > 0.5:
 			var direction := velocity.normalized()
 			var up := Vector3.UP if absf(direction.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
-			node.look_at(position + direction, up)
+			node.look_at(world_position + direction, up)
 	for id in _projectiles.keys():
 		if not seen.has(id):
 			(_projectiles[id] as Node3D).queue_free()

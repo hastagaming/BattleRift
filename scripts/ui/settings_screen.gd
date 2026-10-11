@@ -2,6 +2,16 @@ extends ScreenFrame
 
 const CHECK_TIMEOUT := 20.0
 
+var _address_text: String = ""
+var _address_input: LineEdit
+var _server_label: Label
+var _network_result: Label
+var _test_button: Button
+var _find_button: Button
+var _found_box: VBoxContainer
+var _probing: bool = false
+var _finding: bool = false
+
 var _status_label: Label
 var _toggle: CheckButton
 var _allow_button: Button
@@ -33,6 +43,16 @@ func _button(text: String, callback: Callable) -> Button:
 	return button
 
 
+func _card(column: VBoxContainer, heading: String) -> VBoxContainer:
+	var panel := PanelContainer.new()
+	column.add_child(panel)
+	var card := VBoxContainer.new()
+	card.add_theme_constant_override("separation", 10)
+	panel.add_child(card)
+	card.add_child(_label(heading, 20, UiTheme.MUTED))
+	return card
+
+
 func _build() -> void:
 	var scroll := make_list_scroll()
 	var column := VBoxContainer.new()
@@ -40,12 +60,155 @@ func _build() -> void:
 	column.add_theme_constant_override("separation", 12)
 	scroll.add_child(column)
 	body.add_child(scroll)
-	var panel := PanelContainer.new()
-	column.add_child(panel)
-	var card := VBoxContainer.new()
-	card.add_theme_constant_override("separation", 10)
-	panel.add_child(card)
-	card.add_child(_label("NOTIFICATIONS", 20, UiTheme.MUTED))
+	_build_network_card(column)
+	_build_notification_card(column)
+
+
+# ---- Match server ----
+
+func _build_network_card(column: VBoxContainer) -> void:
+	var card := _card(column, "MATCH SERVER")
+	_server_label = _label("", 22, UiTheme.TEXT)
+	card.add_child(_server_label)
+	card.add_child(_label("The phones and the laptop must use the same Wi-Fi. Enter the laptop's Wi-Fi IPv4 address, as printed when the server starts.", 17, UiTheme.MUTED))
+	var current := NetConfig.current()
+	_address_text = "%s:%d" % [String(current["host"]), int(current["port"])]
+	_address_input = LineEdit.new()
+	_address_input.placeholder_text = "192.168.1.20 or 192.168.1.20:7777"
+	_address_input.text = _address_text
+	_address_input.custom_minimum_size = Vector2(0.0, 52.0)
+	_address_input.text_changed.connect(_on_address_changed)
+	card.add_child(_address_input)
+	card.add_child(_button("Save Address", _on_save_address))
+	_test_button = _button("Test Connection", _on_test)
+	card.add_child(_test_button)
+	_find_button = _button("Find Server on Wi-Fi", _on_find)
+	card.add_child(_find_button)
+	_found_box = VBoxContainer.new()
+	_found_box.add_theme_constant_override("separation", 8)
+	card.add_child(_found_box)
+	_network_result = _label("", 18, UiTheme.MUTED)
+	card.add_child(_network_result)
+	card.add_child(_button("Reset to Default", _on_reset_address))
+	_refresh_server_label()
+
+
+func _refresh_server_label() -> void:
+	var current := NetConfig.current()
+	var host := String(current["host"])
+	_server_label.text = "Server: %s:%d" % [host, int(current["port"])]
+	var hint := NetAddress.loopback_hint(host, OS.get_name() == "Android")
+	if not hint.is_empty():
+		_show_network_result(hint, true)
+
+
+func _show_network_result(message: String, is_error: bool) -> void:
+	_network_result.text = message
+	_network_result.add_theme_color_override("font_color", UiTheme.DANGER if is_error else UiTheme.MUTED)
+
+
+func _on_address_changed(text: String) -> void:
+	_address_text = text
+
+
+func _parsed_address() -> Dictionary:
+	var parsed := NetAddress.parse(_address_text)
+	if not bool(parsed["ok"]):
+		_show_network_result(String(parsed["error"]), true)
+	return parsed
+
+
+func _on_save_address() -> void:
+	var parsed := _parsed_address()
+	if not bool(parsed["ok"]):
+		return
+	if NetConfig.save(String(parsed["host"]), int(parsed["port"])):
+		_refresh_server_label()
+		notify("Server address saved")
+	else:
+		notify("Could not save the address", true)
+
+
+func _on_reset_address() -> void:
+	NetConfig.clear()
+	var current := NetConfig.current()
+	_address_text = "%s:%d" % [String(current["host"]), int(current["port"])]
+	_address_input.text = _address_text
+	_refresh_server_label()
+	notify("Server address reset")
+
+
+func _on_test() -> void:
+	if _probing or _finding:
+		return
+	var parsed := _parsed_address()
+	if not bool(parsed["ok"]):
+		return
+	var host := String(parsed["host"])
+	var port := int(parsed["port"])
+	_probing = true
+	_test_button.disabled = true
+	_test_button.text = "Testing..."
+	_show_network_result("Contacting %s:%d ..." % [host, port], false)
+	var result: Dictionary = await NetProbe.probe(get_tree(), host, port)
+	_probing = false
+	if not is_inside_tree():
+		return
+	_test_button.disabled = false
+	_test_button.text = "Test Connection"
+	if bool(result["ok"]):
+		_show_network_result("The server answered at %s:%d (%d ms)." % [host, port, int(result["ms"])], false)
+		notify("Server reachable")
+		return
+	var message := String(result["error"])
+	var hint := NetAddress.loopback_hint(host, OS.get_name() == "Android")
+	if not hint.is_empty():
+		message += " " + hint
+	_show_network_result(message, true)
+
+
+func _on_find() -> void:
+	if _probing or _finding:
+		return
+	_finding = true
+	_find_button.disabled = true
+	_find_button.text = "Searching..."
+	clear_children(_found_box)
+	_show_network_result("Looking for servers on this Wi-Fi...", false)
+	var servers: Array = await LanDiscovery.discover(get_tree())
+	_finding = false
+	if not is_inside_tree():
+		return
+	_find_button.disabled = false
+	_find_button.text = "Find Server on Wi-Fi"
+	if servers.is_empty():
+		_show_network_result("No server answered. Check that the server is running on the laptop and that its firewall allows UDP %d and UDP %d. You can also enter the IP address by hand." % [NetAddress.DEFAULT_PORT, NetProtocol.DISCOVERY_PORT], true)
+		return
+	_show_network_result("Found %d server(s). Tap one to use it." % servers.size(), false)
+	for entry in servers:
+		var info: Dictionary = entry
+		var text := "%s:%d  (%s)" % [String(info["host"]), int(info["port"]), String(info["name"])]
+		var usable := bool(info["compatible"])
+		if not usable:
+			text += "  - different version"
+		var button := _button(text, _on_use_server.bind(String(info["host"]), int(info["port"])))
+		button.disabled = not usable
+		_found_box.add_child(button)
+
+
+func _on_use_server(host: String, port: int) -> void:
+	if NetConfig.save(host, port):
+		_address_text = "%s:%d" % [host, port]
+		_address_input.text = _address_text
+		_refresh_server_label()
+		_show_network_result("Using %s:%d" % [host, port], false)
+		notify("Server address saved")
+
+
+# ---- Notifications ----
+
+func _build_notification_card(column: VBoxContainer) -> void:
+	var card := _card(column, "NOTIFICATIONS")
 	if not AppNotify.is_available():
 		card.add_child(empty_note("Notifications are only available in the Android app."))
 		return
@@ -67,13 +230,13 @@ func _build() -> void:
 	_download_button = _button("Download Update", _on_download)
 	_download_button.visible = false
 	card.add_child(_download_button)
-	card.add_child(_button("Send Test Notification", _on_test))
+	card.add_child(_button("Send Test Notification", _on_test_notification))
 	AppNotify.permission_result.connect(_on_permission_result)
 	AppNotify.update_check_result.connect(_on_update_result)
-	_refresh()
+	_refresh_notifications()
 
 
-func _refresh() -> void:
+func _refresh_notifications() -> void:
 	var granted := AppNotify.has_permission()
 	_status_label.text = "Notifications are allowed" if granted else "Notifications are not allowed"
 	_status_label.add_theme_color_override("font_color", UiTheme.TEXT if granted else UiTheme.DANGER)
@@ -90,7 +253,7 @@ func _on_toggle(pressed: bool) -> void:
 
 
 func _on_permission_result(status: String) -> void:
-	_refresh()
+	_refresh_notifications()
 	match status:
 		"granted":
 			notify("Notifications allowed")
@@ -152,7 +315,7 @@ func _on_download() -> void:
 		OS.shell_open(_update_url)
 
 
-func _on_test() -> void:
+func _on_test_notification() -> void:
 	if not AppNotify.has_permission():
 		notify("Allow notifications first", true)
 		return

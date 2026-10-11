@@ -131,6 +131,8 @@ func add_peer(peer_id: int, identity: Dictionary) -> Dictionary:
 	member["equipped_weapon"] = String(identity["equipped_weapon"])
 	_peer_slot[peer_id] = slot
 	hub.rpc_id(peer_id, "cl_auth_result", true, "")
+	print("[match %s] %s joined (%d/%d)" % [key, String(member["name"]), connected_peers().size(), _expected])
+	_broadcast_gather()
 	_check_start()
 	return {"ok": true, "error": ""}
 
@@ -151,6 +153,8 @@ func remove_peer(peer_id: int) -> void:
 				_slots.erase(slot)
 			if connected_peers().is_empty():
 				_close()
+			else:
+				_broadcast_gather()
 		Stage.WEAPONS:
 			_abort("A player left before the match started")
 		Stage.RUNNING:
@@ -177,6 +181,14 @@ func connected_peers() -> Array[int]:
 func broadcast_event(data: Dictionary) -> void:
 	for peer_id in connected_peers():
 		hub.rpc_id(peer_id, "cl_event", data)
+
+
+func _broadcast_gather() -> void:
+	var roster: Array = []
+	for slot in _slots:
+		var member: Dictionary = _members[slot]
+		roster.append({"name": member["name"], "team": member["team"], "connected": member["connected"]})
+	broadcast_event({"type": "gather", "expected": _expected, "players": roster})
 
 
 func _check_start() -> void:

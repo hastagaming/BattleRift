@@ -3,7 +3,15 @@ name: Build APK
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+    workflow_dispatch:
+      inputs:
+        variant:
+          description: "release, or debug (debug shows the Developer account and Dev Match for LAN tests)"
+          default: "release"
+          type: choice
+          options:
+            - release
+            - debug
 
 env:
   GODOT_VERSION: "4.3"
@@ -133,7 +141,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
-          godot --headless --verbose --export-release "Android" build/BattleRift.apk 2>&1 | tee export.log
+          godot --headless --verbose --export-${{ inputs.variant || 'release' }} "Android" build/BattleRift.apk 2>&1 | tee export.log
           test -f build/BattleRift.apk
 
       - name: Show the end of the export log
