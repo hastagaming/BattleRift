@@ -394,3 +394,84 @@ func _test_clan_rules() -> void:
 			same = false
 	_check(same, "clan rank requirements use the same tiers as the rank system")
 	rank.free()
+
+
+func _test_net_address() -> void:
+	_check(NetAddress.is_ipv4("192.168.1.20") and NetAddress.is_ipv4("10.0.0.1"), "normal IPv4 addresses are accepted")
+	_check(not NetAddress.is_ipv4("192.168.1") and not NetAddress.is_ipv4("256.1.1.1") and not NetAddress.is_ipv4("a.b.c.d") and not NetAddress.is_ipv4(""), "malformed IPv4 addresses are rejected")
+	_check(NetAddress.is_loopback("127.0.0.1") and NetAddress.is_loopback("localhost") and NetAddress.is_loopback("0.0.0.0"), "loopback addresses are recognised")
+	_check(not NetAddress.is_loopback("192.168.1.20"), "a LAN address is not loopback")
+	var plain := NetAddress.parse("192.168.1.20")
+	_check(bool(plain["ok"]) and String(plain["host"]) == "192.168.1.20" and int(plain["port"]) == NetAddress.DEFAULT_PORT, "an address without a port uses the default port")
+	var with_port := NetAddress.parse(" 192.168.1.20:8123 ")
+	_check(bool(with_port["ok"]) and int(with_port["port"]) == 8123, "an address with a port is parsed")
+	_check(bool(NetAddress.parse("laptop.local:7777")["ok"]), "a host name is accepted")
+	_check(not bool(NetAddress.parse("")["ok"]), "an empty address is rejected")
+	_check(not bool(NetAddress.parse("192.168.1.20:99999")["ok"]) and not bool(NetAddress.parse("192.168.1.20:abc")["ok"]), "an invalid port is rejected")
+	_check(not bool(NetAddress.parse("192.168.1.300")["ok"]), "a number that looks like an IP but is not valid is rejected")
+	_check(not bool(NetAddress.parse("bad host")["ok"]), "an address with spaces is rejected")
+	_check(not NetAddress.loopback_hint("127.0.0.1", true).is_empty() and NetAddress.loopback_hint("127.0.0.1", false).is_empty() and NetAddress.loopback_hint("192.168.1.20", true).is_empty(), "only a phone is warned about a loopback address")
+	_check(NetAddress.unreachable_message("192.168.1.20", 7777, false).contains("7777"), "the failure message names the port")
+
+
+func _test_discovery_reply() -> void:
+	var good := LanDiscovery.parse_reply("BATTLERIFT|%d|7777|Laptop" % NetProtocol.VERSION, "192.168.1.20")
+	_check(String(good.get("host", "")) == "192.168.1.20" and int(good.get("port", 0)) == 7777 and bool(good.get("compatible", false)), "a server reply is understood")
+	var other := LanDiscovery.parse_reply("BATTLERIFT|%d|7777|Laptop" % (NetProtocol.VERSION + 1), "192.168.1.20")
+	_check(not other.is_empty() and not bool(other["compatible"]), "a reply from another protocol version is flagged")
+	_check(LanDiscovery.parse_reply("hello", "192.168.1.20").is_empty() and LanDiscovery.parse_reply("BATTLERIFT|x|y|z", "192.168.1.20").is_empty(), "garbage replies are ignored")
+	_check(LanDiscovery.parse_reply("BATTLERIFT|1|0|z", "192.168.1.20").is_empty(), "a reply with an invalid port is ignored")
+
+
+func _test_enet_loopback() -> void:
+	var port := 47891
+	var server := ENetConnection.new()
+	var bound := server.create_host_bound("127.0.0.1", port, 4)
+	_check(bound == OK, "an ENet server can listen on a UDP port")
+	if bound != OK:
+		return
+	var client := ENetConnection.new()
+	_check(client.create_host(1) == OK, "an ENet client host can be created")
+	var peer := client.connect_to_host("127.0.0.1", port)
+	_check(peer != null, "an ENet client can start a connection")
+	var server_saw := false
+	var client_saw := false
+	var started := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - started < 3000 and not (server_saw and client_saw):
+		var server_event: Array = server.service(10)
+		if int(server_event[0]) == ENetConnection.EVENT_CONNECT:
+			server_saw = true
+		var client_event: Array = client.service(10)
+		if int(client_event[0]) == ENetConnection.EVENT_CONNECT:
+			client_saw = true
+	_check(server_saw and client_saw, "a client really connects to a server over ENet (loopback)")
+	client.destroy()
+	server.destroy()
+
+
+func _test_multiplayer_peer_api() -> void:
+	var server := ENetMultiplayerPeer.new()
+	server.set_bind_ip("0.0.0.0")
+	var listen_error := server.create_server(47892, 4)
+	_check(listen_error == OK, "an ENetMultiplayerPeer server listens on all IPv4 interfaces")
+	if listen_error != OK:
+		return
+	var seen := {"id": 0}
+	server.peer_connected.connect(func(id: int) -> void: seen["id"] = id)
+	var client := ENetMultiplayerPeer.new()
+	_check(client.create_client("127.0.0.1", 47892) == OK, "an ENetMultiplayerPeer client can start connecting")
+	var started := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - started < 3000:
+		server.poll()
+		client.poll()
+		if client.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED and int(seen["id"]) != 0:
+			break
+	_check(client.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED, "the client reaches the connected state")
+	_check(int(seen["id"]) != 0, "the server sees the new peer")
+	if int(seen["id"]) != 0:
+		var packet_peer := server.get_peer(int(seen["id"]))
+		_check(packet_peer != null, "the server can read the packet peer")
+		if packet_peer != null:
+			packet_peer.set_timeout(32, 5000, 10000)
+	client.close()
+	server.close()
