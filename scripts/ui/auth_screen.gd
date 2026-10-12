@@ -85,7 +85,7 @@ func _on_state_changed(busy: bool, message: String, is_error: bool) -> void:
 func _on_provider_pressed(provider: String) -> void:
 	var result: Dictionary = await AuthService.sign_in_with(provider)
 	if bool(result["ok"]):
-		Router.go(Router.LOBBY)
+		Router.go(TutorialStore.landing_scene())
 
 
 func _on_dev_pressed() -> void:

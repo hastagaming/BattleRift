@@ -2,6 +2,7 @@ class_name MatchSession
 extends RefCounted
 
 static var config: Dictionary = {}
+static var tutorial: bool = false
 
 
 static func practice() -> Dictionary:

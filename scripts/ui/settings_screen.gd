@@ -62,6 +62,7 @@ func _build() -> void:
 	body.add_child(scroll)
 	_build_network_card(column)
 	_build_notification_card(column)
+	_build_tutorial_card(column)
 
 
 # ---- Match server ----
@@ -323,3 +324,16 @@ func _on_test_notification() -> void:
 		notify("Test notification sent")
 	else:
 		notify("Could not show the notification", true)
+
+
+# ---- Tutorial ----
+
+func _build_tutorial_card(column: VBoxContainer) -> void:
+	var card := _card(column, "TUTORIAL")
+	card.add_child(_label("Replay the interactive tutorial: the controls in the practice arena, then a tour of rooms, friends, pets, clans and currencies.", 17, UiTheme.MUTED))
+	card.add_child(_button("Replay tutorial", _on_replay_tutorial_pressed))
+
+
+func _on_replay_tutorial_pressed() -> void:
+	TutorialStore.restart()
+	Router.go(Router.TUTORIAL)

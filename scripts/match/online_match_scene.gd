@@ -3,6 +3,8 @@ extends Node3D
 const HUD_ELEMENTS := ["move_joystick", "aim_control", "attack", "weapon_switch", "jump", "dash", "emote", "pet_ability", "ability"]
 const ACTION_MAP := [["jump", 1], ["dash", 2], ["attack", 4], ["weapon_switch", 8], ["emote", 16], ["pet_ability", 32], ["ability", 64]]
 const CONNECT_TIMEOUT := 12.0
+const RECONNECT_WINDOW := 35.0
+const RECONNECT_ATTEMPT_TIMEOUT := 6.0
 const INPUT_EVERY := 2
 const PEER_TIMEOUT_LIMIT := 32
 const PEER_TIMEOUT_MIN_MSEC := 5000
@@ -34,6 +36,9 @@ var _connected: bool = false
 var _setup_done: bool = false
 var _ended: bool = false
 var _leaving: bool = false
+var _reconnecting: bool = false
+var _attempt_failed: bool = false
+var _dev_token: String = ""
 var _editing: bool = false
 var _touch_visible: bool = true
 var _seq: int = 0
@@ -116,8 +121,10 @@ func _close_peer() -> void:
 
 func _session_token() -> String:
 	if NetSession.dev:
-		var base_name := String(PlayerData.data["profile"]["name"]).left(16)
-		return "dev:%s-%04d" % [base_name, randi() % 10000]
+		if _dev_token.is_empty():
+			var base_name := String(PlayerData.data["profile"]["name"]).left(16)
+			_dev_token = "dev:%s-%04d" % [base_name, randi() % 10000]
+		return _dev_token
 	var fresh: bool = await Supabase.ensure_fresh()
 	if not fresh:
 		return ""
@@ -160,6 +167,9 @@ func _on_connected() -> void:
 func _on_connection_failed() -> void:
 	if _leaving or _ended:
 		return
+	if _reconnecting:
+		_attempt_failed = true
+		return
 	_close_peer()
 	_fail(NetAddress.unreachable_message(_host, _port, OS.get_name() == "Android"))
 
@@ -167,15 +177,81 @@ func _on_connection_failed() -> void:
 func _on_server_disconnected() -> void:
 	if _ended or _leaving:
 		return
+	if _reconnecting:
+		_attempt_failed = true
+		return
 	if _setup_done:
-		_fail("Lost the connection to the match server (%s:%d)." % [_host, _port])
+		_begin_reconnect()
 	else:
 		_fail("The server closed the connection before the match started.")
 
 
+func _begin_reconnect() -> void:
+	_reconnecting = true
+	_connected = false
+	_close_peer()
+	_leave_button.text = "Leave match"
+	_reconnect_loop()
+
+
+func _reconnect_loop() -> void:
+	var started := Time.get_ticks_msec()
+	var attempt := 0
+	while _reconnecting and not _leaving and not _ended:
+		var left := RECONNECT_WINDOW - float(Time.get_ticks_msec() - started) / 1000.0
+		if left <= 0.0:
+			break
+		attempt += 1
+		_set_status("Connection lost. Reconnecting...\nAttempt %d  -  %d s left" % [attempt, int(ceil(left))], false)
+		await _reconnect_once()
+		if not _reconnecting or _leaving or _ended:
+			return
+		await get_tree().create_timer(minf(0.5 * float(attempt), 3.0)).timeout
+	if _reconnecting and not _leaving and not _ended:
+		_reconnecting = false
+		_close_peer()
+		_fail("Could not reconnect to the match server (%s:%d). The match continues without you." % [_host, _port])
+
+
+func _reconnect_once() -> void:
+	_attempt_failed = false
+	_connected = false
+	var token := await _session_token()
+	if not _reconnecting or _leaving or _ended:
+		return
+	if token.is_empty():
+		_reconnecting = false
+		_fail("Could not read your session. Sign in again.")
+		return
+	_token = token
+	var peer := ENetMultiplayerPeer.new()
+	if peer.create_client(_host, _port) != OK:
+		return
+	multiplayer.multiplayer_peer = peer
+	var waited := 0.0
+	while _reconnecting and not _leaving and not _ended and not _attempt_failed and waited < RECONNECT_ATTEMPT_TIMEOUT:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+	if _reconnecting and not _leaving and not _ended:
+		_close_peer()
+
+
+func _finish_reconnect() -> void:
+	_reconnecting = false
+	_buffer = SnapshotBuffer.new()
+	_leave_button.text = "Cancel"
+	_status_root.visible = false
+	match_hud.show_banner("RECONNECTED", 1.5)
+
+
 func _on_auth_result(ok: bool, error: String) -> void:
 	if not ok:
+		_reconnecting = false
 		_fail(error)
+		return
+	if _reconnecting:
+		if mirror != null and match_hud != null:
+			_finish_reconnect()
 		return
 	_set_status("Signed in. Waiting for the other players...", false)
 
@@ -251,6 +327,9 @@ func _on_setup(data: Dictionary) -> void:
 	_build_ui()
 	_status_root.visible = false
 	var select := WeaponSelect.new()
+	if bool(data.get("rejoin", false)):
+		match_hud.show_banner("RECONNECTED", 1.5)
+		return
 	select.confirmed.connect(_on_weapon_confirmed)
 	_layer.add_child(select)
 	touch_hud.visible = false
@@ -356,6 +435,11 @@ func _on_event(data: Dictionary) -> void:
 			NetEffects.beam(self, data["from"], data["to"], data["color"])
 		"weapon_rejected":
 			match_hud.show_banner("WEAPON NOT AVAILABLE. USING YOUR DEFAULT.", 2.5)
+		"link":
+			var linked_slot := int(data["slot"])
+			if linked_slot != my_slot:
+				var who := String(mirror.participant(linked_slot).get("name", "?"))
+				match_hud.post_notice("%s %s" % [who, "reconnected" if bool(data["connected"]) else "lost connection"])
 
 
 func _on_snapshot(data: Dictionary) -> void:

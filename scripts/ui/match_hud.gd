@@ -13,6 +13,8 @@ var _stocks_label: Label
 var _banner: Label
 var _feed: VBoxContainer
 var _leave_button: Button
+var _scores_button: Button
+var _scoreboard: Scoreboard
 var _banner_token: int = 0
 var _status_active: bool = false
 
@@ -35,6 +37,10 @@ func _ready() -> void:
 	_leave_button.text = "Leave"
 	_leave_button.pressed.connect(_on_leave_pressed)
 	add_child(_leave_button)
+	_scores_button = Button.new()
+	_scores_button.text = "Scores"
+	_scores_button.pressed.connect(_on_scores_pressed)
+	add_child(_scores_button)
 	_feed = VBoxContainer.new()
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_feed)
@@ -52,6 +58,10 @@ func _ready() -> void:
 	_banner.offset_bottom = 48.0
 	_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_banner)
+	_scoreboard = Scoreboard.new()
+	_scoreboard.state = state
+	_scoreboard.local_peer = local_peer
+	add_child(_scoreboard)
 	state.clock_changed.connect(_on_clock)
 	state.scores_changed.connect(_on_scores_changed)
 	state.participant_changed.connect(_on_participant_changed)
@@ -85,6 +95,10 @@ func _on_participant_changed(_peer_id: int) -> void:
 	_refresh_scores()
 
 
+func _on_scores_pressed() -> void:
+	_scoreboard.toggle()
+
+
 func _layout() -> void:
 	var area := ControlLayout.get_safe_area_rect(get_viewport())
 	var panel_size := _top_panel.get_combined_minimum_size()
@@ -92,6 +106,8 @@ func _layout() -> void:
 	_top_panel.position = Vector2(area.position.x + (area.size.x - panel_size.x) * 0.5, area.position.y + 8.0)
 	_leave_button.size = _leave_button.get_combined_minimum_size()
 	_leave_button.position = area.position + Vector2(12.0, 8.0)
+	_scores_button.size = _scores_button.get_combined_minimum_size()
+	_scores_button.position = Vector2(area.end.x - _scores_button.size.x - 12.0, area.position.y + 8.0)
 	_feed.position = area.position + Vector2(12.0, 64.0)
 
 
@@ -164,6 +180,10 @@ func _on_knockout(victim_id: int, killer_id: int) -> void:
 	var text := "%s fell" % victim_name
 	if killer_id >= 0:
 		text = "%s knocked out %s" % [String(state.participant(killer_id).get("name", "?")), victim_name]
+	post_notice(text)
+
+
+func post_notice(text: String) -> void:
 	var line := Label.new()
 	line.text = text
 	line.add_theme_color_override("font_color", UiTheme.TEXT)

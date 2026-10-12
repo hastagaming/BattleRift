@@ -58,6 +58,22 @@ func _ready() -> void:
 	select.confirmed.connect(_on_weapon_confirmed)
 	_layer.add_child(select)
 	touch_hud.visible = false
+	if MatchSession.tutorial:
+		_start_tutorial()
+
+
+func _start_tutorial() -> void:
+	var director := TutorialDirector.new()
+	director.state = state
+	director.player = player
+	director.camera_rig = camera_rig
+	director.local_peer = local_peer
+	director.layer = _layer
+	add_child(director)
+
+
+func _exit_tree() -> void:
+	MatchSession.tutorial = false
 
 
 func _take_spawn() -> Vector3:

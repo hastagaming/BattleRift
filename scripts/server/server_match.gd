@@ -15,6 +15,7 @@ const MAX_ACTION_RATE := 30.0
 const EMOTE_COOLDOWN_MSEC := 1000
 const RESPAWN_DELAY := 2.5
 const COUNTDOWN := 3.0
+const RECONNECT_GRACE := 30.0
 
 var hub: NetHub
 var admin: SupabaseAdmin
@@ -22,6 +23,7 @@ var key: String = ""
 var room: Dictionary = {}
 var persist: bool = false
 var open_roster: bool = false
+var reconnect_grace: float = RECONNECT_GRACE
 var stage: Stage = Stage.GATHERING
 var state: MatchState
 var arena: Arena
@@ -83,6 +85,8 @@ func _make_member(slot: int, user_id: String, display_name: String, team: String
 		"last_seq": -1,
 		"last_emote_msec": 0,
 		"since_input": 0.0,
+		"grace_left": -1.0,
+		"result": {},
 		"input_tokens": MAX_INPUT_RATE,
 		"action_tokens": MAX_ACTION_RATE,
 	}
@@ -92,7 +96,11 @@ func _make_member(slot: int, user_id: String, display_name: String, team: String
 
 
 func add_peer(peer_id: int, identity: Dictionary) -> Dictionary:
-	if _closing or stage != Stage.GATHERING:
+	if _closing:
+		return {"ok": false, "error": "The match has already started"}
+	if stage == Stage.RUNNING or stage == Stage.DONE:
+		return _rejoin(peer_id, identity)
+	if stage != Stage.GATHERING:
 		return {"ok": false, "error": "The match has already started"}
 	var user_id := String(identity["user_id"])
 	var slot := int(_user_slot.get(user_id, 0))
@@ -137,7 +145,39 @@ func add_peer(peer_id: int, identity: Dictionary) -> Dictionary:
 	return {"ok": true, "error": ""}
 
 
-func remove_peer(peer_id: int) -> void:
+# A player who comes back during a running match keeps their slot and body. Only the same
+# authenticated account can take its slot, and a stale connection of that account is replaced.
+func _rejoin(peer_id: int, identity: Dictionary) -> Dictionary:
+	var slot := int(_user_slot.get(String(identity["user_id"]), 0))
+	if slot == 0:
+		return {"ok": false, "error": "You are not part of this match"}
+	var member: Dictionary = _members[slot]
+	if state != null and bool(state.participant(slot).get("forfeited", false)):
+		return {"ok": false, "error": "You already left this match"}
+	if bool(member["connected"]):
+		var old_peer := int(member["peer"])
+		_peer_slot.erase(old_peer)
+		var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+		if enet != null:
+			enet.disconnect_peer(old_peer)
+	member["connected"] = true
+	member["peer"] = peer_id
+	member["grace_left"] = -1.0
+	member["last_seq"] = -1
+	member["since_input"] = 0.0
+	_peer_slot[peer_id] = slot
+	hub.rpc_id(peer_id, "cl_auth_result", true, "")
+	_send_setup(peer_id, slot, true)
+	_send_state_to(peer_id)
+	if stage == Stage.DONE and not (member["result"] as Dictionary).is_empty():
+		hub.rpc_id(peer_id, "cl_result", member["result"])
+	_state_dirty = true
+	broadcast_event({"type": "link", "slot": slot, "connected": true, "grace": 0.0})
+	print("[match %s] %s reconnected (peer %d)" % [key, String(member["name"]), peer_id])
+	return {"ok": true, "error": ""}
+
+
+func remove_peer(peer_id: int, voluntary: bool = false) -> void:
 	var slot := int(_peer_slot.get(peer_id, 0))
 	if slot == 0:
 		return
@@ -160,13 +200,58 @@ func remove_peer(peer_id: int) -> void:
 		Stage.RUNNING:
 			state.forfeit(slot)
 			var body: PlayerController = _bodies.get(slot)
-			if body != null:
-				body.set_active(false)
-			if connected_peers().is_empty():
+			if voluntary:
+				_forfeit_slot(slot)
+			else:
+				_begin_grace(slot)
+			if not _anyone_present():
 				_close()
 		Stage.DONE:
 			if connected_peers().is_empty():
 				_close()
+
+
+func _forfeit_slot(slot: int) -> void:
+	var member: Dictionary = _members[slot]
+	member["grace_left"] = -1.0
+	state.forfeit(slot)
+	var body: PlayerController = _bodies.get(slot)
+	if body != null:
+		body.set_active(false)
+
+
+func _begin_grace(slot: int) -> void:
+	var member: Dictionary = _members[slot]
+	member["grace_left"] = reconnect_grace
+	var body: PlayerController = _bodies.get(slot)
+	if body != null:
+		var input: PlayerInput = body.remote_input
+		input.apply_state(Vector2.ZERO, input.yaw, input.pitch, false)
+	_state_dirty = true
+	broadcast_event({"type": "link", "slot": slot, "connected": false, "grace": reconnect_grace})
+	print("[match %s] %s lost connection, holding the slot for %.0fs" % [key, String(member["name"]), reconnect_grace])
+
+
+func _tick_grace(delta: float) -> void:
+	for slot in _slots:
+		var member: Dictionary = _members[slot]
+		if bool(member["connected"]) or float(member["grace_left"]) < 0.0:
+			continue
+		member["grace_left"] = float(member["grace_left"]) - delta
+		if float(member["grace_left"]) <= 0.0:
+			print("[match %s] %s did not return in time and forfeits" % [key, String(member["name"])])
+			_forfeit_slot(slot)
+	if stage == Stage.RUNNING and not _anyone_present():
+		_close()
+
+
+func _anyone_present() -> bool:
+	if not connected_peers().is_empty():
+		return true
+	for slot in _slots:
+		if float(_members[slot]["grace_left"]) >= 0.0:
+			return true
+	return false
 
 
 func connected_peers() -> Array[int]:
@@ -273,11 +358,16 @@ func _spawn_bodies() -> void:
 
 
 func _broadcast_setup() -> void:
-	var roster: Array = []
 	for slot in _slots:
-		var member: Dictionary = _members[slot]
+		_send_setup(int(_members[slot]["peer"]), slot, false)
+
+
+func _send_setup(peer_id: int, slot: int, rejoin: bool) -> void:
+	var roster: Array = []
+	for roster_slot in _slots:
+		var member: Dictionary = _members[roster_slot]
 		roster.append({
-			"slot": slot,
+			"slot": roster_slot,
 			"name": member["name"],
 			"team": member["team"],
 			"skin": member["skin"],
@@ -286,18 +376,17 @@ func _broadcast_setup() -> void:
 			"pet": member["pet"],
 			"accessories": member["accessories"],
 		})
-	for slot in _slots:
-		var member: Dictionary = _members[slot]
-		hub.rpc_id(int(member["peer"]), "cl_setup", {
-			"slot": slot,
-			"mode": state.mode,
-			"stocks": state.stocks_per_player,
-			"time_limit": state.time_limit,
-			"respawn_delay": state.respawn_delay,
-			"countdown": COUNTDOWN,
-			"weapon_seconds": WEAPON_TIMEOUT,
-			"participants": roster,
-		})
+	hub.rpc_id(peer_id, "cl_setup", {
+		"slot": slot,
+		"mode": state.mode,
+		"stocks": state.stocks_per_player,
+		"time_limit": state.time_limit,
+		"respawn_delay": state.respawn_delay,
+		"countdown": COUNTDOWN,
+		"weapon_seconds": WEAPON_TIMEOUT,
+		"participants": roster,
+		"rejoin": rejoin,
+	})
 
 
 func on_weapon(peer_id: int, weapon_id: String) -> void:
@@ -418,6 +507,7 @@ func _physics_process(delta: float) -> void:
 				_begin_match()
 		Stage.RUNNING:
 			state.advance(delta)
+			_tick_grace(delta)
 		Stage.DONE:
 			if _result_sent and _stage_time > END_LINGER:
 				_close()
@@ -543,17 +633,29 @@ func _flush_state(delta: float) -> void:
 		_send_state()
 
 
+func _state_payload() -> Dictionary:
+	var rows: Dictionary = state.participants.duplicate(true)
+	for slot in rows:
+		rows[slot]["connected"] = bool(_members[slot]["connected"]) if _members.has(slot) else false
+	return {
+		"phase": state.phase,
+		"scores": state.scores,
+		"participants": rows,
+		"clock": state.clock,
+	}
+
+
 func _send_state() -> void:
 	if state == null:
 		return
-	var data := {
-		"phase": state.phase,
-		"scores": state.scores,
-		"participants": state.participants,
-		"clock": state.clock,
-	}
+	var data := _state_payload()
 	for peer_id in connected_peers():
 		hub.rpc_id(peer_id, "cl_state", data)
+
+
+func _send_state_to(peer_id: int) -> void:
+	if state != null:
+		hub.rpc_id(peer_id, "cl_state", _state_payload())
 
 
 func _send_snapshot() -> void:
@@ -735,8 +837,6 @@ func _on_ended(final_result: Dictionary) -> void:
 		return
 	for slot in _slots:
 		var member: Dictionary = _members[slot]
-		if not bool(member["connected"]):
-			continue
 		var copy := final_result.duplicate(true)
 		copy["persisted"] = persisted
 		copy["note"] = note
@@ -752,7 +852,9 @@ func _on_ended(final_result: Dictionary) -> void:
 				else:
 					shown["rank_tier"] = String(change["tier_after"])
 			copy["rewards"] = shown
-		hub.rpc_id(int(member["peer"]), "cl_result", copy)
+		member["result"] = copy
+		if bool(member["connected"]):
+			hub.rpc_id(int(member["peer"]), "cl_result", copy)
 	_result_sent = true
 	_stage_time = 0.0
 	_send_state()

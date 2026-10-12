@@ -204,6 +204,13 @@ func get_setting(key: String, default_value: Variant = null) -> Variant:
 	return data["settings"].get(key, default_value)
 
 
+func flush_settings_now() -> void:
+	if remote:
+		await _flush_settings()
+	else:
+		save()
+
+
 func set_setting(key: String, value: Variant) -> void:
 	if not is_signed_in:
 		return

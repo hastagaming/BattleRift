@@ -70,6 +70,6 @@ func _run() -> void:
 	_status.text = "Restoring session"
 	var restored: bool = await AuthService.restore_session()
 	if restored:
-		Router.go(Router.LOBBY)
+		Router.go(TutorialStore.landing_scene())
 	else:
 		Router.go(Router.AUTH)

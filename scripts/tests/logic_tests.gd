@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_test_characters()
 	_test_room_sizes()
 	_test_clan_rules()
+	_test_scoreboard()
 	_test_net_address()
 	_test_discovery_reply()
 	_test_enet_loopback()

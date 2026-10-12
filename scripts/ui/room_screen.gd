@@ -17,6 +17,11 @@ var _was_in_room: bool = false
 var _capacity: int = 2
 var _public_room: bool = false
 var _join_input: LineEdit
+var _join_password: LineEdit
+var _create_name: LineEdit
+var _create_password: LineEdit
+var _edit_name: LineEdit
+var _edit_password: LineEdit
 var _public_list: VBoxContainer
 var _launching: bool = false
 
@@ -77,6 +82,16 @@ func _label(text: String, font_size: int = 22, color: Color = UiTheme.TEXT) -> L
 	return label
 
 
+func _line_edit(placeholder: String, max_length: int, secret: bool) -> LineEdit:
+	var edit := LineEdit.new()
+	edit.placeholder_text = placeholder
+	edit.max_length = max_length
+	edit.secret = secret
+	edit.custom_minimum_size = Vector2(0.0, 52.0)
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return edit
+
+
 func _section(text: String) -> Label:
 	return _label(text, 18, UiTheme.MUTED)
 
@@ -100,6 +115,11 @@ func _clear_body() -> void:
 		child.queue_free()
 	_public_list = null
 	_join_input = null
+	_join_password = null
+	_create_name = null
+	_create_password = null
+	_edit_name = null
+	_edit_password = null
 
 
 func _enter() -> void:
@@ -169,11 +189,22 @@ func _show_menu() -> void:
 		button.pressed.connect(func() -> void: _capacity = size_value)
 		sizes.add_child(button)
 	_body.add_child(sizes)
+	_create_name = _line_edit("ROOM NAME (optional)", 24, false)
+	_body.add_child(_create_name)
+	_create_password = _line_edit("PASSWORD (optional, 4-32 characters)", 32, true)
+	_create_password.visible = not _public_room
 	var privacy := CheckButton.new()
 	privacy.text = "Public room (listed for everyone)"
 	privacy.button_pressed = _public_room
-	privacy.toggled.connect(func(enabled: bool) -> void: _public_room = enabled)
+	privacy.toggled.connect(func(enabled: bool) -> void:
+		_public_room = enabled
+		if _create_password != null:
+			_create_password.visible = not enabled
+			if enabled:
+				_create_password.text = ""
+	)
 	_body.add_child(privacy)
+	_body.add_child(_create_password)
 	_body.add_child(_button("Create Room", _on_create_pressed))
 	_body.add_child(_section("JOIN WITH CODE"))
 	var join_row := HBoxContainer.new()
@@ -187,6 +218,8 @@ func _show_menu() -> void:
 	join_row.add_child(_join_input)
 	join_row.add_child(_button("Join", _on_join_pressed))
 	_body.add_child(join_row)
+	_join_password = _line_edit("PASSWORD (if the room has one)", 32, true)
+	_body.add_child(_join_password)
 	var list_header := HBoxContainer.new()
 	var caption := _section("PUBLIC ROOMS")
 	caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -200,7 +233,18 @@ func _show_menu() -> void:
 
 
 func _on_create_pressed() -> void:
-	_act("create_room", {"p_capacity": _capacity, "p_privacy": "public" if _public_room else "private"})
+	var args := {
+		"p_capacity": _capacity,
+		"p_privacy": "public" if _public_room else "private",
+		"p_name": _create_name.text.strip_edges(),
+	}
+	var password := _create_password.text
+	if not _public_room and not password.is_empty():
+		if password.length() < 4:
+			_set_status("The password needs at least 4 characters.", true)
+			return
+		args["p_password"] = password
+	_act("create_room", args)
 
 
 func _on_code_changed(text: String) -> void:
@@ -217,7 +261,10 @@ func _on_join_pressed() -> void:
 	if code.is_empty():
 		_set_status("Enter a room code first.", true)
 		return
-	_act("join_room", {"p_code": code})
+	var args := {"p_code": code}
+	if not _join_password.text.is_empty():
+		args["p_password"] = _join_password.text
+	_act("join_room", args)
 
 
 func _refresh_public() -> void:
@@ -233,8 +280,9 @@ func _refresh_public() -> void:
 	for entry in rooms:
 		var info: Dictionary = entry
 		var code := String(info["code"])
-		var text := "%s   %s   %s   %s   %d/%d" % [
-			code,
+		var room_name := String(info.get("name", "")).strip_edges()
+		var text := "%s   %s   %s   %s   %s   %d/%d" % [
+			room_name if not room_name.is_empty() else code,
 			String(SIZE_LABELS.get(int(info["capacity"]), "?")),
 			String(info["mode"]).capitalize(),
 			String(info["host_name"]),
@@ -274,17 +322,21 @@ func _show_room() -> void:
 	var is_host := _client.is_host()
 	var me := _client.my_member()
 	var capacity := int(room["capacity"])
-	_title.text = "Room %s" % String(room["code"])
+	var room_name := String(room.get("name", "")).strip_edges()
+	var lock := "  [locked]" if bool(room.get("has_password", false)) else ""
+	_title.text = "%s%s" % [room_name if not room_name.is_empty() else "Room", lock]
 	_back_button.text = "Leave"
 	_set_status("", false)
-	_body.add_child(_label("%s   |   %s   |   %s" % [
+	_body.add_child(_label("CODE %s   |   %s   |   %s   |   %s" % [
+		String(room["code"]),
 		String(SIZE_LABELS.get(capacity, "?")),
-		String(room["mode"]).capitalize(),
 		String(room["privacy"]).capitalize(),
 	], 20, UiTheme.MUTED))
 	var editable := is_host and not started
 	_option("Privacy", [["Private", "private"], ["Public", "public"]], String(room["privacy"]), editable,
 		func(value: Variant) -> void: _change({"privacy": value}))
+	if editable:
+		_add_host_security_rows(room)
 	_option("Mode", [["Stock", "stock"], ["Unlimited", "unlimited"]], String(room["mode"]), editable,
 		func(value: Variant) -> void: _change({"mode": value}))
 	var map_items: Array = []
@@ -319,6 +371,34 @@ func _show_room() -> void:
 		_body.add_child(start)
 	else:
 		_body.add_child(_label("ALL READY. WAITING FOR HOST" if all_ready else String(check["error"]).to_upper(), 22, GREEN if all_ready else UiTheme.MUTED))
+
+
+func _add_host_security_rows(room: Dictionary) -> void:
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 8)
+	_edit_name = _line_edit("ROOM NAME", 24, false)
+	_edit_name.text = String(room.get("name", ""))
+	name_row.add_child(_edit_name)
+	name_row.add_child(_button("Save name", func() -> void: _change({"name": _edit_name.text.strip_edges()}), 48.0))
+	_body.add_child(name_row)
+	if String(room["privacy"]) != "private":
+		return
+	var password_row := HBoxContainer.new()
+	password_row.add_theme_constant_override("separation", 8)
+	_edit_password = _line_edit("NEW PASSWORD (4-32 characters)", 32, true)
+	password_row.add_child(_edit_password)
+	password_row.add_child(_button("Set", _on_set_password_pressed, 48.0))
+	if bool(room.get("has_password", false)):
+		password_row.add_child(_button("Remove", func() -> void: _change({"password": ""}), 48.0))
+	_body.add_child(password_row)
+
+
+func _on_set_password_pressed() -> void:
+	var password := _edit_password.text
+	if password.length() < 4:
+		_set_status("The password needs at least 4 characters.", true)
+		return
+	_change({"password": password})
 
 
 func _team_panel(team: String, room: Dictionary, capacity: int, started: bool, is_host: bool, me: Dictionary) -> PanelContainer:

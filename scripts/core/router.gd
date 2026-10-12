@@ -15,6 +15,7 @@ const MISSIONS := "res://scenes/missions/missions.tscn"
 const SETTINGS := "res://scenes/settings/settings.tscn"
 const SOCIAL := "res://scenes/social/social.tscn"
 const CLAN := "res://scenes/clan/clan.tscn"
+const TUTORIAL := "res://scenes/tutorial/tutorial.tscn"
 
 
 func go(path: String) -> void:

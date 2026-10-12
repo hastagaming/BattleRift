@@ -18,9 +18,11 @@ var max_matches: int = 4
 var dev_accounts: bool = false
 var dev_capacity: int = 2
 var dev_mode: String = "stock"
+var reconnect_grace: float = ServerMatch.RECONNECT_GRACE
 
 var _peers: Dictionary = {}
 var _matches: Dictionary = {}
+var _finished: Dictionary = {}
 var _clock: float = 0.0
 
 
@@ -108,6 +110,7 @@ func _read_options() -> void:
 	dev_capacity = capacity if GameConfig.is_valid_custom_room_size(capacity) else 2
 	var mode := String(options.get("dev-mode", "stock"))
 	dev_mode = mode if mode in ["stock", "unlimited"] else "stock"
+	reconnect_grace = clampf(float(options.get("reconnect-grace", str(ServerMatch.RECONNECT_GRACE))), 2.0, 120.0)
 
 
 func _process(delta: float) -> void:
@@ -179,6 +182,9 @@ func _on_auth(peer_id: int, token: String, protocol: int) -> void:
 		_reject(peer_id, String(identity["error"]))
 		return
 	var match_key := String(identity["key"])
+	if _finished.has(match_key):
+		_reject(peer_id, "This match has already ended")
+		return
 	var instance: ServerMatch = _matches.get(match_key)
 	if instance == null:
 		if _matches.size() >= max_matches:
@@ -268,6 +274,7 @@ func _create_match(match_key: String, identity: Dictionary) -> ServerMatch:
 	instance.room = identity["room"]
 	instance.persist = bool(identity["persist"]) and admin.has_service_key()
 	instance.open_roster = bool(identity["open_roster"])
+	instance.reconnect_grace = reconnect_grace
 	instance.finished.connect(_on_match_finished.bind(match_key))
 	add_child(instance)
 	_matches[match_key] = instance
@@ -280,6 +287,8 @@ func _on_match_finished(match_key: String) -> void:
 	if instance == null:
 		return
 	_matches.erase(match_key)
+	if match_key != "dev":
+		_remember_finished(match_key)
 	for peer_id in instance.connected_peers():
 		var info: Dictionary = _peers.get(peer_id, {})
 		if not info.is_empty():
@@ -310,7 +319,7 @@ func _on_action(peer_id: int, action: int) -> void:
 func _on_leave(peer_id: int) -> void:
 	var instance := _match_of(peer_id)
 	if instance != null:
-		instance.remove_peer(peer_id)
+		instance.remove_peer(peer_id, true)
 
 
 func _match_from_node(node: Node) -> ServerMatch:
