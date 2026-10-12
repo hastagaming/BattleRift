@@ -298,6 +298,13 @@ func _on_match_finished(match_key: String) -> void:
 	print("[server] match %s closed" % match_key)
 
 
+func _remember_finished(match_key: String) -> void:
+	_finished[match_key] = _clock
+	for old_key in _finished.keys():
+		if _clock - float(_finished[old_key]) > 3600.0:
+			_finished.erase(old_key)
+
+
 func _on_weapon(peer_id: int, weapon_id: String) -> void:
 	var instance := _match_of(peer_id)
 	if instance != null:
