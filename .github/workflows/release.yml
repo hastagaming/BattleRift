@@ -18,6 +18,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
+      ANDROID_BUILD_TOOLS: "36.1.0"
+      ANDROID_MIN_SDK: "26"
+      ANDROID_TARGET_SDK: "36"
       GH_TOKEN: ${{ github.token }}
       INPUT_TAG: ${{ github.event.inputs.tag }}
       INPUT_RUN_ID: ${{ github.event.inputs.run_id }}
@@ -36,10 +39,10 @@ jobs:
             FIRST=$(ls -d "$TOOLS"/*/ | head -n1)
             sudo ln -s "${FIRST%/}" "$TOOLS/latest"
           fi
-          if [ ! -d "$SDK/build-tools/34.0.0" ]; then
-            yes | sudo env "PATH=$PATH" "JAVA_HOME=$JAVA_HOME" "$TOOLS/latest/bin/sdkmanager" "build-tools;34.0.0" || true
+          if [ ! -d "$SDK/build-tools/$ANDROID_BUILD_TOOLS" ]; then
+            yes | sudo env "PATH=$PATH" "JAVA_HOME=$JAVA_HOME" "$TOOLS/latest/bin/sdkmanager" "build-tools;$ANDROID_BUILD_TOOLS" || true
           fi
-          test -d "$SDK/build-tools/34.0.0"
+          test -d "$SDK/build-tools/$ANDROID_BUILD_TOOLS" || { echo "Android build-tools $ANDROID_BUILD_TOOLS are missing"; exit 1; }
 
       - name: Download APK from previous build
         run: |
@@ -50,6 +53,13 @@ jobs:
           test -n "$RUN_ID"
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name battlerift-apk --dir input
 
+      - name: Check the APK to be signed
+        run: |
+          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          "$BT/aapt2" dump badging input/BattleRift.apk | grep -E "^package:|^sdkVersion:|^targetSdkVersion:"
+          "$BT/aapt2" dump badging input/BattleRift.apk | grep -q "^sdkVersion:'$ANDROID_MIN_SDK'" || { echo "This build does not have minSdk $ANDROID_MIN_SDK. Run a new Build APK first, or pass the run_id of a newer build."; exit 1; }
+          "$BT/aapt2" dump badging input/BattleRift.apk | grep -q "^targetSdkVersion:'$ANDROID_TARGET_SDK'" || { echo "This build does not have targetSdk $ANDROID_TARGET_SDK. Run a new Build APK first, or pass the run_id of a newer build."; exit 1; }
+
       - name: Sign APK
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -57,7 +67,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          BT="$ANDROID_HOME/build-tools/34.0.0"
+          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           "$BT/zipalign" -p -f 4 input/BattleRift.apk aligned.apk
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "BattleRift-${INPUT_TAG}.apk" aligned.apk

@@ -5,10 +5,10 @@ plugins {
 
 android {
     namespace = "com.hastagaming.battlerift.notify"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
+        minSdk = 26
     }
 
     buildTypes {
