@@ -1,79 +1,108 @@
 name: Release APK
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag (example: v0.1.0)"
-        required: true
-      run_id:
-        description: "Build run ID (empty = latest successful build)"
-        required: false
+  push:
+    tags: ["v*"]
 
 permissions:
-  contents: write
-  actions: read
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
-      ANDROID_BUILD_TOOLS: "36.1.0"
-      ANDROID_MIN_SDK: "26"
-      ANDROID_TARGET_SDK: "36"
-      GH_TOKEN: ${{ github.token }}
-      INPUT_TAG: ${{ github.event.inputs.tag }}
-      INPUT_RUN_ID: ${{ github.event.inputs.run_id }}
+      TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          fetch-depth: 0
 
-      - name: Prepare Android build tools
+      - name: Load the toolchain versions
+        run: cat tools/android/toolchain.env >> "$GITHUB_ENV"
+
+      - name: Validate the tag and derive the version
+        id: version
         run: |
-          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          TOOLS="$SDK/cmdline-tools"
-          if [ ! -e "$TOOLS/latest" ]; then
-            FIRST=$(ls -d "$TOOLS"/*/ | head -n1)
-            sudo ln -s "${FIRST%/}" "$TOOLS/latest"
-          fi
-          if [ ! -d "$SDK/build-tools/$ANDROID_BUILD_TOOLS" ]; then
-            yes | sudo env "PATH=$PATH" "JAVA_HOME=$JAVA_HOME" "$TOOLS/latest/bin/sdkmanager" "build-tools;$ANDROID_BUILD_TOOLS" || true
-          fi
-          test -d "$SDK/build-tools/$ANDROID_BUILD_TOOLS" || { echo "Android build-tools $ANDROID_BUILD_TOOLS are missing"; exit 1; }
+          python3 tools/android/version.py resolve "$TAG" --github-output "$GITHUB_OUTPUT"
+          git tag --list 'v*' | python3 tools/android/version.py check-order "$TAG"
 
-      - name: Download APK from previous build
+      - name: Write the version into export_presets.cfg (workspace only, no commit)
+        run: python3 tools/android/version.py apply "$TAG" --preset export_presets.cfg
+
+      - name: Check the configuration and the build scripts
         run: |
-          RUN_ID="$INPUT_RUN_ID"
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
-          fi
-          test -n "$RUN_ID"
-          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name battlerift-apk --dir input
+          python3 tools/android/check_config.py
+          python3 -m unittest discover -s tools/android -p 'test_*.py' -v
 
-      - name: Check the APK to be signed
+      - uses: ./.github/actions/setup-android-export
+
+      - name: Run logic tests
         run: |
-          BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
-          "$BT/aapt2" dump badging input/BattleRift.apk | grep -E "^package:|^sdkVersion:|^targetSdkVersion:"
-          "$BT/aapt2" dump badging input/BattleRift.apk | grep -q "^sdkVersion:'$ANDROID_MIN_SDK'" || { echo "This build does not have minSdk $ANDROID_MIN_SDK. Run a new Build APK first, or pass the run_id of a newer build."; exit 1; }
-          "$BT/aapt2" dump badging input/BattleRift.apk | grep -q "^targetSdkVersion:'$ANDROID_TARGET_SDK'" || { echo "This build does not have targetSdk $ANDROID_TARGET_SDK. Run a new Build APK first, or pass the run_id of a newer build."; exit 1; }
+          godot --headless --import || true
+          godot --headless -s res://scripts/tests/logic_tests.gd
 
-      - name: Sign APK
+      - name: Export the release APK
+        run: |
+          set -o pipefail
+          mkdir -p build
+          godot --headless --verbose --export-release "Android" build/BattleRift.apk 2>&1 | tee export.log
+          test -f build/BattleRift.apk
+
+      - name: Verify the exported APK
+        run: tools/android/verify_apk.sh build/BattleRift.apk --version-name "${{ steps.version.outputs.version_name }}" --version-code "${{ steps.version.outputs.version_code }}"
+
+      - name: Sign the APK with the release key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          for name in KEYSTORE_BASE64 KS_PASS KEY_ALIAS KEY_PASS; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The GitHub secret for $name is not set"
+              exit 1
+            fi
+          done
           BT="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          trap 'rm -f "$RUNNER_TEMP/release.jks"' EXIT
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          "$BT/zipalign" -p -f 4 input/BattleRift.apk aligned.apk
-          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "BattleRift-${INPUT_TAG}.apk" aligned.apk
-          "$BT/apksigner" verify --print-certs "BattleRift-${INPUT_TAG}.apk"
-          rm -f "$RUNNER_TEMP/release.jks"
+          mkdir -p dist
+          "$BT/zipalign" -p -f 4 build/BattleRift.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "dist/BattleRift-${TAG}.apk" "$RUNNER_TEMP/aligned.apk"
 
-      - name: Publish release
+      - name: Verify the signed APK
         run: |
-          gh release create "$INPUT_TAG" "BattleRift-${INPUT_TAG}.apk" --repo "$GITHUB_REPOSITORY" --title "BattleRift $INPUT_TAG" --generate-notes
+          tools/android/verify_apk.sh "dist/BattleRift-${TAG}.apk" --signed --version-name "${{ steps.version.outputs.version_name }}" --version-code "${{ steps.version.outputs.version_code }}"
+          (cd dist && sha256sum "BattleRift-${TAG}.apk" | tee "BattleRift-${TAG}.apk.sha256")
+
+      - name: Show the end of the export log
+        if: failure()
+        run: tail -n 120 export.log || true
+
+      - name: Upload the signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: battlerift-release
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: battlerift-release
+          path: dist
+
+      - name: Publish the GitHub Release
+        run: |
+          gh release create "$TAG" "dist/BattleRift-${TAG}.apk" "dist/BattleRift-${TAG}.apk.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "BattleRift $TAG" --generate-notes

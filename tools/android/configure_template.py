@@ -1,157 +1,139 @@
 #!/usr/bin/env python3
-"""Configures the Godot 4.3 Android build template for compileSdk 36 and Android 16 behaviour.
+"""Patch the Godot 4.3 Android build template so it builds for compileSdk 36.
 
-Godot 4.3 ships its Android template with compileSdk 34, AGP 8.2.0 and Gradle 8.2. The template is
-unpacked fresh by CI for every build, so this script patches the unpacked copy. Every change is
-asserted: if the template layout is not what is expected, the script fails instead of guessing.
+The template that ships with Godot 4.3 uses AGP 8.2.0, Gradle 8.2 and compileSdk 34.
+This script changes only what is needed for API 36:
+  * config.gradle: Android Gradle Plugin, compileSdk and build tools version
+  * gradle-wrapper.properties: Gradle version
+  * gradle.properties: allow a compileSdk newer than the plugin was tested with
+  * AndroidManifest.xml: opt out of predictive back and of restricted resizability,
+    which apps targeting API 36 would otherwise get by default
 
-  configure_template.py <android/build directory>            patch the template
-  configure_template.py <android/build directory> --verify   only check that it is patched
-
-The AGP / Gradle / compileSdk / build-tools combination below is the one the official Godot 4.7
-template ships for API 36. Min SDK and target SDK are not set here: they come from the export preset
-(gradle_build/min_sdk and gradle_build/target_sdk) and are passed to Gradle by the Godot exporter.
+Every change is idempotent, so running the script twice gives the same result.
 """
 
 import argparse
+import os
 import re
 import sys
-import xml.etree.ElementTree as ET
-from pathlib import Path
 
-ANDROID_NS = "http://schemas.android.com/apk/res/android"
-PROPERTY_NAME = "android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
-BACK_ATTRIBUTE = "android:enableOnBackInvokedCallback"
-
-
-class TemplateError(Exception):
-    pass
+BACK_ATTRIBUTE = 'android:enableOnBackInvokedCallback="false"'
+RESIZE_PROPERTY = (
+    '        <property\n'
+    '            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"\n'
+    '            android:value="true" />\n'
+)
 
 
-def read(path: Path) -> str:
-    if not path.is_file():
-        raise TemplateError("missing template file: %s" % path)
-    return path.read_text(encoding="utf-8")
+class PatchError(RuntimeError):
+    """Raised when the template does not look like the expected Godot template."""
 
 
-def replace_once(text: str, pattern: str, replacement: str, label: str) -> str:
-    result, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+def _replace_once(text, pattern, replacement, label):
+    result, count = re.subn(pattern, replacement, text, count=0, flags=re.MULTILINE)
     if count != 1:
-        raise TemplateError("could not find %s in the template" % label)
+        raise PatchError("Expected exactly one %s, found %d." % (label, count))
     return result
 
 
-def patch_config(root: Path, args: argparse.Namespace) -> None:
-    path = root / "config.gradle"
-    text = read(path)
-    text = replace_once(text, r"(androidGradlePlugin\s*:\s*')[^']+(')", r"\g<1>%s\g<2>" % args.agp, "androidGradlePlugin")
-    text = replace_once(text, r"(compileSdk\s*:\s*)\d+", r"\g<1>%s" % args.compile_sdk, "compileSdk")
-    text = replace_once(text, r"(buildTools\s*:\s*')[^']+(')", r"\g<1>%s\g<2>" % args.build_tools, "buildTools")
-    path.write_text(text, encoding="utf-8")
-
-
-def patch_wrapper(root: Path, args: argparse.Namespace) -> None:
-    path = root / "gradle" / "wrapper" / "gradle-wrapper.properties"
-    text = read(path)
-    text = replace_once(
+def patch_config_gradle(text, agp, compile_sdk, build_tools):
+    text = _replace_once(
         text,
-        r"(distributionUrl=.*/distributions/gradle-)[0-9.]+(-bin\.zip)",
-        r"\g<1>%s\g<2>" % args.gradle,
-        "distributionUrl",
+        r"^(\s*androidGradlePlugin\s*:\s*)'[^']*'",
+        lambda m: "%s'%s'" % (m.group(1), agp),
+        "androidGradlePlugin entry",
     )
-    path.write_text(text, encoding="utf-8")
+    text = _replace_once(
+        text,
+        r"^(\s*compileSdk\s*:\s*)[0-9]+",
+        lambda m: "%s%s" % (m.group(1), compile_sdk),
+        "compileSdk entry",
+    )
+    text = _replace_once(
+        text,
+        r"^(\s*buildTools\s*:\s*)'[^']*'",
+        lambda m: "%s'%s'" % (m.group(1), build_tools),
+        "buildTools entry",
+    )
+    return text
 
 
-def patch_properties(root: Path, args: argparse.Namespace) -> None:
-    path = root / "gradle.properties"
-    text = read(path)
-    line = "android.suppressUnsupportedCompileSdk=%s" % args.compile_sdk
-    lines = [entry for entry in text.splitlines() if not entry.startswith("android.suppressUnsupportedCompileSdk=")]
-    lines.append(line)
-    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+def patch_wrapper(text, gradle_version):
+    return _replace_once(
+        text,
+        r"gradle-[0-9][0-9.]*-bin\.zip",
+        lambda _m: "gradle-%s-bin.zip" % gradle_version,
+        "Gradle distributionUrl",
+    )
 
 
-def patch_manifest(root: Path, _args: argparse.Namespace) -> None:
-    path = root / "AndroidManifest.xml"
-    text = read(path)
-    match = re.search(r"<application\b[^>]*>", text, flags=re.DOTALL)
-    if match is None:
-        raise TemplateError("could not find the <application> element in AndroidManifest.xml")
-    tag = match.group(0)
-    new_tag = tag
-    if BACK_ATTRIBUTE not in new_tag:
-        new_tag = new_tag.replace("<application", '<application\n        %s="false"' % BACK_ATTRIBUTE, 1)
-    text = text[: match.start()] + new_tag + text[match.end():]
-    if PROPERTY_NAME not in text:
-        end = text.index(new_tag) + len(new_tag)
-        text = (
-            text[:end]
-            + '\n\n        <!-- Android 16 ignores orientation and resizability limits on large screens for apps that\n'
-            + '             target API 36. BattleRift is a landscape game, so it keeps the previous behaviour. -->\n'
-            + '        <property\n            android:name="%s"\n            android:value="true" />\n' % PROPERTY_NAME
-            + text[end:]
-        )
-    path.write_text(text, encoding="utf-8")
+def ensure_property(text, key, value):
+    line = "%s=%s" % (key, value)
+    if re.search(r"^%s=" % re.escape(key), text, flags=re.MULTILINE):
+        return re.sub(r"^%s=[^\r\n]*" % re.escape(key), lambda _m: line, text, flags=re.MULTILINE)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text + line + "\n"
 
 
-def verify(root: Path, args: argparse.Namespace) -> list:
-    problems = []
-    config = read(root / "config.gradle")
-    expectations = {
-        "androidGradlePlugin": (r"androidGradlePlugin\s*:\s*'([^']+)'", args.agp),
-        "compileSdk": (r"compileSdk\s*:\s*(\d+)", str(args.compile_sdk)),
-        "buildTools": (r"buildTools\s*:\s*'([^']+)'", args.build_tools),
-    }
-    for label, (pattern, expected) in expectations.items():
-        found = re.search(pattern, config)
-        if found is None or found.group(1) != expected:
-            problems.append("config.gradle %s is %s, expected %s" % (label, found.group(1) if found else "missing", expected))
-    wrapper = read(root / "gradle" / "wrapper" / "gradle-wrapper.properties")
-    found = re.search(r"gradle-([0-9.]+)-bin\.zip", wrapper)
-    if found is None or found.group(1) != args.gradle:
-        problems.append("gradle wrapper is %s, expected %s" % (found.group(1) if found else "missing", args.gradle))
-    if "android.suppressUnsupportedCompileSdk=%s" % args.compile_sdk not in read(root / "gradle.properties"):
-        problems.append("gradle.properties does not suppress the unsupported compileSdk warning")
-    manifest_text = read(root / "AndroidManifest.xml")
-    try:
-        manifest = ET.fromstring(manifest_text)
-    except ET.ParseError as error:
-        return problems + ["AndroidManifest.xml is not valid XML: %s" % error]
-    application = manifest.find("application")
-    if application is None:
-        return problems + ["AndroidManifest.xml has no <application>"]
-    if application.get("{%s}enableOnBackInvokedCallback" % ANDROID_NS) != "false":
-        problems.append("<application> does not set android:enableOnBackInvokedCallback=\"false\"")
-    properties = [p for p in application.findall("property") if p.get("{%s}name" % ANDROID_NS) == PROPERTY_NAME]
-    if len(properties) != 1 or properties[0].get("{%s}value" % ANDROID_NS) != "true":
-        problems.append("<application> does not declare %s exactly once with value true" % PROPERTY_NAME)
-    return problems
+def patch_manifest(text):
+    application = re.search(r"<application\b", text)
+    if not application:
+        raise PatchError("The template manifest has no <application> element.")
+    if "enableOnBackInvokedCallback" not in text:
+        text = text[: application.end()] + "\n        " + BACK_ATTRIBUTE + text[application.end():]
+    if "PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" not in text:
+        closing = text.rfind("</application>")
+        if closing == -1:
+            raise PatchError("The template manifest has no </application> element.")
+        text = text[:closing] + RESIZE_PROPERTY + "\n    " + text[closing:]
+    return text
 
 
-def main() -> int:
+def _read(path):
+    with open(path, "r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _write(path, text):
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
+def _existing(build_dir, *candidates):
+    found = [os.path.join(build_dir, c) for c in candidates if os.path.isfile(os.path.join(build_dir, c))]
+    if not found:
+        raise PatchError("None of these files exist in %s: %s" % (build_dir, ", ".join(candidates)))
+    return found
+
+
+def configure(build_dir, agp, gradle, compile_sdk, build_tools):
+    for path in _existing(build_dir, "config.gradle", "app/config.gradle"):
+        _write(path, patch_config_gradle(_read(path), agp, compile_sdk, build_tools))
+    for path in _existing(build_dir, "gradle/wrapper/gradle-wrapper.properties"):
+        _write(path, patch_wrapper(_read(path), gradle))
+    props = os.path.join(build_dir, "gradle.properties")
+    current = _read(props) if os.path.isfile(props) else ""
+    _write(props, ensure_property(current, "android.suppressUnsupportedCompileSdk", compile_sdk))
+    for path in _existing(build_dir, "AndroidManifest.xml", "app/AndroidManifest.xml"):
+        _write(path, patch_manifest(_read(path)))
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("template_dir", type=Path)
-    parser.add_argument("--verify", action="store_true", help="only check the template, do not change it")
-    parser.add_argument("--agp", default="8.6.1")
-    parser.add_argument("--gradle", default="8.11.1")
-    parser.add_argument("--compile-sdk", default="36")
-    parser.add_argument("--build-tools", default="36.1.0")
-    args = parser.parse_args()
+    parser.add_argument("build_dir")
+    parser.add_argument("--agp", required=True)
+    parser.add_argument("--gradle", required=True)
+    parser.add_argument("--compile-sdk", required=True)
+    parser.add_argument("--build-tools", required=True)
+    args = parser.parse_args(argv)
     try:
-        if not args.verify:
-            patch_config(args.template_dir, args)
-            patch_wrapper(args.template_dir, args)
-            patch_properties(args.template_dir, args)
-            patch_manifest(args.template_dir, args)
-        problems = verify(args.template_dir, args)
-    except TemplateError as error:
-        print("ERROR: %s" % error, file=sys.stderr)
+        configure(args.build_dir, args.agp, args.gradle, args.compile_sdk, args.build_tools)
+    except (PatchError, OSError) as error:
+        print("::error::%s" % error)
         return 1
-    if problems:
-        for problem in problems:
-            print("ERROR: %s" % problem, file=sys.stderr)
-        return 1
-    print("Android template OK: AGP %s, Gradle %s, compileSdk %s, build-tools %s" % (args.agp, args.gradle, args.compile_sdk, args.build_tools))
+    print("Android template configured: AGP %s, Gradle %s, compileSdk %s, build tools %s"
+          % (args.agp, args.gradle, args.compile_sdk, args.build_tools))
     return 0
 
 

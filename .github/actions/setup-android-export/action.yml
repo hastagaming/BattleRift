@@ -1,0 +1,104 @@
+name: Set up the Godot Android export
+description: Installs Java, the Android SDK parts, Godot with export templates, builds the notify plugin and prepares the patched Android build template. Reads tools/android/toolchain.env values from the environment.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    - name: Prepare Android SDK
+      shell: bash
+      run: |
+        SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+        echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+        TOOLS="$SDK/cmdline-tools"
+        if [ ! -e "$TOOLS/latest" ]; then
+          FIRST=$(ls -d "$TOOLS"/*/ | head -n1)
+          sudo ln -s "${FIRST%/}" "$TOOLS/latest"
+        fi
+        MISSING=()
+        [ -d "$SDK/platforms/android-$ANDROID_COMPILE_SDK" ] || MISSING+=("platforms;android-$ANDROID_COMPILE_SDK")
+        [ -d "$SDK/build-tools/$ANDROID_BUILD_TOOLS" ] || MISSING+=("build-tools;$ANDROID_BUILD_TOOLS")
+        [ -d "$SDK/ndk/23.2.8568313" ] || MISSING+=("ndk;23.2.8568313")
+        [ -d "$SDK/cmake/3.10.2.4988404" ] || MISSING+=("cmake;3.10.2.4988404")
+        if [ "${#MISSING[@]}" -gt 0 ]; then
+          yes | sudo env "PATH=$PATH" "JAVA_HOME=$JAVA_HOME" "$TOOLS/latest/bin/sdkmanager" "${MISSING[@]}" || true
+        fi
+        test -d "$SDK/platforms/android-$ANDROID_COMPILE_SDK" || { echo "Android SDK Platform $ANDROID_COMPILE_SDK is missing"; exit 1; }
+        test -d "$SDK/build-tools/$ANDROID_BUILD_TOOLS" || { echo "Android build-tools $ANDROID_BUILD_TOOLS are missing"; exit 1; }
+
+    - uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: "8.7"
+
+    - name: Install Godot and export templates
+      shell: bash
+      run: |
+        BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+        curl -fsSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+        curl -fsSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+        unzip -q godot.zip
+        sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+        TEMPLATE_DIR="$HOME/.local/share/godot/export_templates"
+        mkdir -p "$TEMPLATE_DIR"
+        unzip -q templates.tpz -d "$TEMPLATE_DIR"
+        mv "$TEMPLATE_DIR/templates" "$TEMPLATE_DIR/${GODOT_VERSION}.stable"
+        test -f "$TEMPLATE_DIR/${GODOT_VERSION}.stable/android_source.zip"
+
+    - name: Create temporary keystores
+      shell: bash
+      run: |
+        keytool -genkeypair -keystore "$HOME/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 9999 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+        keytool -genkeypair -keystore "$RUNNER_TEMP/build.jks" -alias build -keyalg RSA -keysize 2048 -validity 1 -storepass buildpass -keypass buildpass -dname "CN=BattleRift CI"
+        echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/build.jks" >> "$GITHUB_ENV"
+        echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=build" >> "$GITHUB_ENV"
+        echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=buildpass" >> "$GITHUB_ENV"
+
+    - name: Configure Godot for Android
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.config/godot"
+        printf '%s\n' \
+          '[gd_resource type="EditorSettings" format=3]' \
+          '' \
+          '[resource]' \
+          "export/android/android_sdk_path = \"$ANDROID_SDK_ROOT\"" \
+          "export/android/java_sdk_path = \"$JAVA_HOME\"" \
+          "export/android/debug_keystore = \"$HOME/debug.keystore\"" \
+          'export/android/debug_keystore_user = "androiddebugkey"' \
+          'export/android/debug_keystore_pass = "android"' \
+          'export/android/force_system_user = false' \
+          'export/android/shutdown_adb_on_exit = false' \
+          'export/android/timestamping_authority_url = ""' \
+          > "$HOME/.config/godot/editor_settings-${GODOT_VERSION}.tres"
+
+    - name: Build and test the notification plugin
+      shell: bash
+      run: |
+        gradle --project-dir android-plugin --no-daemon test assembleDebug assembleRelease
+        mkdir -p addons/battlerift_notify/bin/debug addons/battlerift_notify/bin/release
+        cp android-plugin/battlerift-notify/build/outputs/aar/battlerift-notify-debug.aar addons/battlerift_notify/bin/debug/
+        cp android-plugin/battlerift-notify/build/outputs/aar/battlerift-notify-release.aar addons/battlerift_notify/bin/release/
+        test -f addons/battlerift_notify/bin/release/battlerift-notify-release.aar
+
+    - name: Install and patch the Android build template
+      shell: bash
+      run: |
+        rm -rf android
+        mkdir -p android/build
+        unzip -q -o "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" -d android/build
+        touch android/build/.gdignore
+        printf '%s' "${GODOT_VERSION}.stable" > android/.build_version
+        test -f android/build/build.gradle || { echo "build.gradle is missing from the Android template"; exit 1; }
+        python3 tools/android/configure_template.py android/build \
+          --agp "$ANDROID_GRADLE_PLUGIN" \
+          --gradle "$ANDROID_GRADLE_VERSION" \
+          --compile-sdk "$ANDROID_COMPILE_SDK" \
+          --build-tools "$ANDROID_BUILD_TOOLS"
+        echo "--- template toolchain"
+        sed -n 1,12p android/build/config.gradle
+        grep distributionUrl android/build/gradle/wrapper/gradle-wrapper.properties
