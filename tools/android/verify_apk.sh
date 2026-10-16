@@ -49,10 +49,10 @@ MANIFEST=$(mktemp)
 trap 'rm -f "$BADGING" "$MANIFEST"' EXIT
 "$AAPT2" dump badging "$APK" > "$BADGING" || { echo "::error::aapt2 could not read the APK"; exit 1; }
 "$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" > "$MANIFEST" || { echo "::error::aapt2 could not read the manifest"; exit 1; }
-grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" "$BADGING"
+grep -E "^package:|^sdkVersion:|^minSdkVersion:|^targetSdkVersion:|^native-code:" "$BADGING"
 
 grep -q "^package: name='$ANDROID_PACKAGE'" "$BADGING" || fail "Package identifier is not $ANDROID_PACKAGE"
-grep -q "^sdkVersion:'$ANDROID_MIN_SDK'" "$BADGING" || fail "minSdkVersion is not $ANDROID_MIN_SDK"
+grep -Eq "^(minSdkVersion|sdkVersion):'$ANDROID_MIN_SDK'" "$BADGING" || fail "minSdkVersion is not $ANDROID_MIN_SDK"
 grep -q "^targetSdkVersion:'$ANDROID_TARGET_SDK'" "$BADGING" || fail "targetSdkVersion is not $ANDROID_TARGET_SDK"
 grep -q "compileSdkVersion='$ANDROID_COMPILE_SDK'" "$BADGING" || echo "::warning::compileSdkVersion $ANDROID_COMPILE_SDK was not found in the APK manifest"
 grep -q "^native-code:.*'arm64-v8a'" "$BADGING" || fail "The APK has no arm64-v8a native code"
