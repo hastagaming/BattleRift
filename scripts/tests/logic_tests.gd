@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_test_characters()
 	_test_room_sizes()
 	_test_clan_rules()
+	_test_social_logic()
 	_test_net_address()
 	_test_discovery_reply()
 	_test_enet_loopback()
@@ -394,6 +395,44 @@ func _test_clan_rules() -> void:
 			same = false
 	_check(same, "clan rank requirements use the same tiers as the rank system")
 	rank.free()
+
+
+func _test_social_logic() -> void:
+	var members: Array = [
+		{"user_id": "c", "name": "zed", "online": true, "ready": false, "level": 3},
+		{"user_id": "a", "name": "Amy", "online": false, "ready": true, "level": 5},
+		{"user_id": "l", "name": "Boss", "online": false, "ready": false, "level": 9},
+		{"user_id": "b", "name": "bob", "online": true, "ready": true, "level": 2},
+	]
+	var sorted := SocialLogic.sort_members(members, "l")
+	var order: Array[String] = []
+	for entry in sorted:
+		order.append(String((entry as Dictionary)["user_id"]))
+	_check(order == ["l", "b", "c", "a"], "party members sort leader first, then online, then by name")
+	_check(String((members[0] as Dictionary)["user_id"]) == "c", "sorting members does not change the original list")
+	var progress := SocialLogic.ready_progress(members, "l")
+	_check(int(progress["ready"]) == 2 and int(progress["total"]) == 3, "the leader is not counted in the ready progress")
+	_check(not SocialLogic.all_ready(members, "l"), "the party is not ready while a member is not ready")
+	_check(SocialLogic.ready_hint(members, "l") == "Waiting for 1 member to get ready.", "the ready hint names the number of members still waiting")
+	_check(SocialLogic.all_ready([{"user_id": "l", "ready": false}], "l"), "a solo party counts as ready")
+	_check(SocialLogic.ready_hint([{"user_id": "l"}], "l").is_empty(), "a solo party shows no ready hint")
+	_check(SocialLogic.member_tags({"ready": true}, false, true) == ["YOU", "READY"], "a ready member who is you gets the YOU and READY tags")
+	_check(SocialLogic.member_tags({}, true, false) == ["LEADER"], "the leader only gets the LEADER tag")
+	_check(SocialLogic.member_subtitle({"level": 4, "online": true}) == "Lv 4  |  Online", "member subtitle shows level and presence")
+	var friends: Array = [
+		{"user_id": "1", "name": "Zoe", "online": false, "in_party": false, "level": 1},
+		{"user_id": "2", "name": "Ann", "online": true, "in_party": true, "level": 2},
+		{"user_id": "3", "name": "Bea", "online": true, "in_party": false, "level": 3},
+	]
+	var friend_order: Array[String] = []
+	for entry in SocialLogic.sort_friends(friends):
+		friend_order.append(String((entry as Dictionary)["user_id"]))
+	_check(friend_order == ["2", "3", "1"], "friends sort online first, then by name")
+	_check(SocialLogic.online_count(friends) == 2, "online friends are counted")
+	_check(not SocialLogic.can_invite(friends[1]) and SocialLogic.can_invite(friends[2]) and not SocialLogic.can_invite(friends[0]), "only online friends who are not in a party can be invited")
+	_check(SocialLogic.friend_subtitle(friends[1]) == "Lv 2  |  Online  |  In a party", "friend subtitle shows the party state")
+	_check(SocialLogic.badge_text("Party", 0) == "Party" and SocialLogic.badge_text("Party", 3) == "Party (3)" and SocialLogic.badge_text("Party", 12) == "Party (9+)", "tab badges hide zero and cap at 9+")
+	_check(SocialLogic.initial("  bob") == "B" and SocialLogic.initial("") == "?", "avatar initial handles names and empty names")
 
 
 func _test_net_address() -> void:

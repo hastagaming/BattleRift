@@ -5,6 +5,9 @@ signal state_changed(state: Dictionary)
 const POLL_INTERVAL := 3.0
 
 var state: Dictionary = {}
+# True after the first successful party_state call. last_error is empty while the last poll worked.
+var loaded: bool = false
+var last_error: String = ""
 
 var _timer: Timer
 var _polling: bool = false
@@ -34,6 +37,8 @@ func _on_signed_out() -> void:
 	_timer.stop()
 	state = {}
 	_launching = false
+	loaded = false
+	last_error = ""
 	state_changed.emit(state)
 
 
@@ -80,7 +85,16 @@ func refresh() -> void:
 	if not PlayerData.is_signed_in:
 		return
 	if bool(result["ok"]) and result["body"] is Dictionary:
+		loaded = true
+		last_error = ""
 		_apply(result["body"])
+	else:
+		var previous := last_error
+		last_error = String(result["error"])
+		if last_error.is_empty():
+			last_error = "Could not reach the server"
+		if previous != last_error:
+			state_changed.emit(state)
 
 
 func _apply(body: Dictionary) -> void:

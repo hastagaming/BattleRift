@@ -36,7 +36,7 @@ func _ready() -> void:
 func _create_widget(element_id: String) -> Control:
 	match element_id:
 		"move_joystick":
-			return VirtualJoystick.new()
+			return TouchJoystick.new()
 		"aim_control":
 			return AimPad.new()
 	if BUTTONS.has(element_id):
