@@ -27,6 +27,10 @@ func _initialize() -> void:
 	_test_room_sizes()
 	_test_clan_rules()
 	_test_social_logic()
+	await _test_smooth_visuals()
+	_test_pet_sounds()
+	_test_emotes_and_voice()
+	_test_login_art()
 	_test_net_address()
 	_test_discovery_reply()
 	_test_enet_loopback()
@@ -433,6 +437,156 @@ func _test_social_logic() -> void:
 	_check(SocialLogic.friend_subtitle(friends[1]) == "Lv 2  |  Online  |  In a party", "friend subtitle shows the party state")
 	_check(SocialLogic.badge_text("Party", 0) == "Party" and SocialLogic.badge_text("Party", 3) == "Party (3)" and SocialLogic.badge_text("Party", 12) == "Party (9+)", "tab badges hide zero and cap at 9+")
 	_check(SocialLogic.initial("  bob") == "B" and SocialLogic.initial("") == "?", "avatar initial handles names and empty names")
+
+
+func _count_boxes(node: Node) -> int:
+	var count := 0
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh is BoxMesh:
+		count += 1
+	for child in node.get_children():
+		count += _count_boxes(child)
+	return count
+
+
+func _count_meshes(node: Node) -> int:
+	var count := 1 if node is MeshInstance3D else 0
+	for child in node.get_children():
+		count += _count_meshes(child)
+	return count
+
+
+# Half size of a primitive mesh. Mesh.get_aabb() needs a real renderer, so it is worked out here.
+func _mesh_extent(mesh: Mesh) -> Vector3:
+	if mesh is SphereMesh:
+		var sphere := mesh as SphereMesh
+		return Vector3(sphere.radius, sphere.height * 0.5, sphere.radius)
+	if mesh is CapsuleMesh:
+		var capsule := mesh as CapsuleMesh
+		return Vector3(capsule.radius, capsule.height * 0.5, capsule.radius)
+	if mesh is CylinderMesh:
+		var cylinder := mesh as CylinderMesh
+		var radius := maxf(cylinder.top_radius, cylinder.bottom_radius)
+		return Vector3(radius, cylinder.height * 0.5, radius)
+	if mesh is TorusMesh:
+		var torus := mesh as TorusMesh
+		return Vector3(torus.outer_radius, (torus.outer_radius - torus.inner_radius) * 0.5, torus.outer_radius)
+	return Vector3.ZERO
+
+
+# Combined bounds of every mesh under a node, with all local transforms applied.
+func _bounds(node: Node, parent_transform: Transform3D = Transform3D.IDENTITY) -> AABB:
+	var transform_here := parent_transform
+	if node is Node3D:
+		transform_here = parent_transform * (node as Node3D).transform
+	var result := AABB()
+	var has_any := false
+	if node is MeshInstance3D:
+		var extent := _mesh_extent((node as MeshInstance3D).mesh)
+		result = transform_here * AABB(-extent, extent * 2.0)
+		has_any = true
+	for child in node.get_children():
+		var child_bounds := _bounds(child, transform_here)
+		if child_bounds.size == Vector3.ZERO:
+			continue
+		result = child_bounds if not has_any else result.merge(child_bounds)
+		has_any = true
+	return result
+
+
+func _test_smooth_visuals() -> void:
+	var signatures: Dictionary = {}
+	var all_smooth := true
+	var all_detailed := true
+	for pet_id in PetDb.ORDER:
+		var visual := PetVisuals.build(pet_id)
+		if _count_boxes(visual) > 0:
+			all_smooth = false
+		if _count_meshes(visual) < 8:
+			all_detailed = false
+		var box := _bounds(visual)
+		signatures["%.2f|%.2f|%.2f|%d" % [box.size.x, box.size.y, box.size.z, _count_meshes(visual)]] = pet_id
+		visual.free()
+	_check(all_smooth, "no pet is built from boxes")
+	_check(all_detailed, "every pet has at least 8 parts")
+	_check(signatures.size() == PetDb.ORDER.size(), "every pet has its own silhouette")
+	# These classes use autoloads, which only exist at run time in a -s script, so they are loaded by path.
+	var model: Node3D = (load("res://scripts/player/character_model.gd") as GDScript).new()
+	root.add_child(model)
+	await process_frame
+	_check(_count_boxes(model) == 0, "the player character has no box parts")
+	_check(_count_meshes(model) >= 14, "the player character has a torso, hips, head, limbs, hands and shoes")
+	for emote_id in ["attack", "follow_me", "watch_out", "hello_mate"]:
+		_check(model.play_emote(emote_id), "the character can play the %s emote" % emote_id)
+		model.stop_emote()
+	model.free()
+	var extras_boxes := 0
+	for character_id in CharacterDb.ORDER:
+		var extras: Node3D = (load("res://scripts/player/character_extras.gd") as GDScript).call("build", character_id)
+		extras_boxes += _count_boxes(extras)
+		extras.free()
+	for item_id in ["crown", "visor", "scarf", "cape"]:
+		var accessory: Node3D = (load("res://scripts/player/accessory_visuals.gd") as GDScript).call("build", item_id)
+		extras_boxes += _count_boxes(accessory)
+		accessory.free()
+	_check(extras_boxes == 0, "character extras and accessories have no box parts")
+
+
+func _test_pet_sounds() -> void:
+	var hashes: Dictionary = {}
+	var all_valid := true
+	var all_audible := true
+	var all_in_range := true
+	for pet_id in PetDb.ORDER:
+		var samples := PetSounds.samples_for(pet_id)
+		var seconds := float(samples.size()) / float(PetSounds.RATE)
+		if seconds < 0.2 or seconds > 0.8:
+			all_in_range = false
+		var peak := 0.0
+		var energy := 0.0
+		for value in samples:
+			if is_nan(value) or is_inf(value):
+				all_valid = false
+			peak = maxf(peak, absf(value))
+			energy += value * value
+		if peak < 0.7 or peak > 0.81 or sqrt(energy / maxf(float(samples.size()), 1.0)) < 0.03:
+			all_audible = false
+		hashes[hash(samples.to_byte_array())] = pet_id
+		var stream := PetSounds.stream_for(pet_id)
+		if stream == null or stream.data.size() != samples.size() * 2:
+			all_valid = false
+	_check(all_valid, "every pet sound renders without invalid samples")
+	_check(all_in_range, "every pet sound lasts between 0.2 and 0.8 seconds")
+	_check(all_audible, "every pet sound is loud enough and never clips")
+	_check(hashes.size() == PetDb.ORDER.size(), "every pet has its own sound")
+	_check(PetSounds.stream_for("pet_missing") == null, "an unknown pet has no sound")
+
+
+func _test_emotes_and_voice() -> void:
+	var constants: Dictionary = (load("res://scripts/player/character_model.gd") as GDScript).get_script_constant_map()
+	var emotes: Array = constants["EMOTES"]
+	var starters: Array = constants["STARTER_EMOTES"]
+	for emote_id in emotes:
+		_check(ItemDb.ITEMS.has(emote_id) and String(ItemDb.ITEMS[emote_id]["category"]) == "emote", "emote %s is in the item catalog" % emote_id)
+	for emote_id in starters:
+		_check(emote_id in emotes, "starter emote %s is a real emote" % emote_id)
+	_check(EmoteVoice.line_for("attack") == "Attack!", "attack says Attack!")
+	_check(EmoteVoice.line_for("follow_me") == "Follow me", "follow_me says Follow me")
+	_check(EmoteVoice.line_for("watch_out") == "Watch out!", "watch_out says Watch out!")
+	_check(EmoteVoice.line_for("hello_mate") == "Hello mate", "hello_mate says Hello mate")
+	_check(EmoteVoice.line_for("wave").is_empty(), "the silent emotes have no spoken line")
+	var every_line_has_delivery := true
+	for emote_id in EmoteVoice.LINES:
+		if not EmoteVoice.DELIVERY.has(emote_id):
+			every_line_has_delivery = false
+	_check(every_line_has_delivery, "every spoken line has a rate and pitch")
+	_check(EmoteVoice.recording_for("attack") == null, "no recording means the phone voice is used")
+
+
+func _test_login_art() -> void:
+	var texture := LoginArt.hero_texture(Vector2(1280.0, 720.0))
+	_check(texture != null and texture.get_width() == 1280 and texture.get_height() == 720, "the login SVG is drawn at 1280 by 720")
+	var wide := LoginArt.hero_texture(Vector2(2400.0, 1080.0))
+	_check(wide != null and wide.get_width() > 1280, "the login SVG is drawn sharper on a larger screen")
 
 
 func _test_net_address() -> void:

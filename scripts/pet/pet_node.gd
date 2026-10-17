@@ -9,6 +9,7 @@ var _visual: Node3D
 var _time: float = 0.0
 var _pop: float = 0.0
 var _initialized: bool = false
+var _animated: Array[Node3D] = []
 
 
 func setup(pet_id: String) -> void:
@@ -24,12 +25,31 @@ func setup(pet_id: String) -> void:
 		return
 	_visual = PetVisuals.build(pet_id)
 	add_child(_visual)
+	_animated = _collect_animated(_visual)
 	visible = true
 	_initialized = false
 
 
+func _collect_animated(node: Node) -> Array[Node3D]:
+	var found: Array[Node3D] = []
+	for child in node.get_children():
+		if child is Node3D and (child.has_meta("wing") or child.has_meta("spin")):
+			found.append(child)
+		found.append_array(_collect_animated(child))
+	return found
+
+
+func _animate_parts(delta: float) -> void:
+	for part in _animated:
+		if part.has_meta("wing"):
+			part.rotation.z = float(part.get_meta("wing")) * sin(_time * 8.0) * 0.35
+		elif part.has_meta("spin"):
+			part.rotate_y(float(part.get_meta("spin")) * delta)
+
+
 func pulse() -> void:
 	_pop = 1.0
+	PetSounds.play(self, _pet_id)
 
 
 func _process(delta: float) -> void:
@@ -38,6 +58,7 @@ func _process(delta: float) -> void:
 	_time += delta
 	_pop = maxf(_pop - delta * 3.0, 0.0)
 	var bob := sin(_time * 3.0) * 0.08
+	_animate_parts(delta)
 	if follow_target != null and is_instance_valid(follow_target):
 		var shown := true
 		if follow_target is PlayerController:

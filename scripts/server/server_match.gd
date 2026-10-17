@@ -465,7 +465,9 @@ func _on_emote_request(peer_id: int, emote_choice: String) -> void:
 	if slot == 0 or not _bodies.has(slot) or stage != Stage.RUNNING:
 		return
 	var member: Dictionary = _members[slot]
-	if emote_choice not in CharacterModel.EMOTES or emote_choice not in member["emotes"]:
+	if emote_choice not in CharacterModel.EMOTES:
+		return
+	if emote_choice not in member["emotes"] and emote_choice not in CharacterModel.STARTER_EMOTES:
 		return
 	var now := Time.get_ticks_msec()
 	if now - int(member["last_emote_msec"]) < EMOTE_COOLDOWN_MSEC:

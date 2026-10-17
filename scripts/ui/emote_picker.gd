@@ -26,19 +26,21 @@ func _ready() -> void:
 	title.add_theme_font_size_override("font_size", 26)
 	title.add_theme_color_override("font_color", UiTheme.ACCENT)
 	column.add_child(title)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	column.add_child(row)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	column.add_child(grid)
 	var owned: Array = PlayerData.data["inventory"].get("emote", [])
-	for entry in owned:
-		var emote_id := String(entry)
-		if emote_id not in CharacterModel.EMOTES:
+	for emote_id in CharacterModel.EMOTES:
+		if emote_id not in owned and emote_id not in CharacterModel.STARTER_EMOTES:
 			continue
 		var button := Button.new()
 		button.text = ItemDb.display_name(emote_id)
-		button.custom_minimum_size = Vector2(130.0, 64.0)
+		button.custom_minimum_size = Vector2(150.0, 64.0)
+		button.add_theme_color_override("font_color", ItemDb.color_of(emote_id))
 		button.pressed.connect(_on_pick.bind(emote_id))
-		row.add_child(button)
+		grid.add_child(button)
 	var close := Button.new()
 	close.text = "Close"
 	close.custom_minimum_size = Vector2(0.0, 48.0)

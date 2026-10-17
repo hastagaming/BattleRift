@@ -14,13 +14,17 @@ static func _material(color: Color, emissive: bool) -> StandardMaterial3D:
 
 
 static func _box(root: Node3D, size: Vector3, color: Color, at: Vector3, euler_degrees: Vector3 = Vector3.ZERO, emissive: bool = false) -> void:
-	var mesh := BoxMesh.new()
-	mesh.size = size
+	var mesh := SphereMesh.new()
+	mesh.radius = 1.0
+	mesh.height = 2.0
+	mesh.radial_segments = 32
+	mesh.rings = 16
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
 	instance.material_override = _material(color, emissive)
 	instance.position = at
 	instance.rotation_degrees = euler_degrees
+	instance.scale = size * 0.6
 	root.add_child(instance)
 
 

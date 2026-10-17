@@ -18,7 +18,9 @@ const SKIN_COLORS := {
 	"ember": Color("#ff7a4d"),
 	"shadow": Color("#5b5472"),
 }
-const EMOTES: Array[String] = ["wave", "spin", "cheer"]
+const EMOTES: Array[String] = ["wave", "spin", "cheer", "attack", "follow_me", "watch_out", "hello_mate"]
+# Everyone can use these. They are communication emotes, so they are never locked behind the shop.
+const STARTER_EMOTES: Array[String] = ["wave", "attack", "follow_me", "watch_out", "hello_mate"]
 const HOLD_ANGLE := 1.1
 const ACCESSORY_SLOTS: Array[String] = ["head", "face", "body", "back"]
 
@@ -29,6 +31,7 @@ var _skin_material := StandardMaterial3D.new()
 var _accent_material := StandardMaterial3D.new()
 var _pants_material := StandardMaterial3D.new()
 var _eye_material := StandardMaterial3D.new()
+var _shoe_material := StandardMaterial3D.new()
 var _arm_left: Node3D
 var _arm_right: Node3D
 var _leg_left: Node3D
@@ -47,12 +50,25 @@ var _attack_tween: Tween
 
 func _ready() -> void:
 	_eye_material.albedo_color = Color("#10131c")
-	var torso := _mesh_instance(_box_mesh(TORSO_SIZE), _accent_material)
+	_shoe_material.albedo_color = Color("#1a1d29")
+	var torso_mesh := CapsuleMesh.new()
+	torso_mesh.radius = TORSO_SIZE.z * 0.5
+	torso_mesh.height = TORSO_SIZE.y + 0.04
+	torso_mesh.radial_segments = 32
+	torso_mesh.rings = 12
+	var torso := _mesh_instance(torso_mesh, _accent_material)
+	torso.scale = Vector3(TORSO_SIZE.x / TORSO_SIZE.z, 1.0, 1.0)
 	torso.position = Vector3(0.0, TORSO_Y, 0.0)
 	add_child(torso)
+	var hips := _mesh_instance(_round_mesh(1.0), _pants_material)
+	hips.scale = Vector3(0.23, 0.14, 0.17)
+	hips.position = Vector3(0.0, HIP_Y + 0.06, 0.0)
+	add_child(hips)
 	var head_mesh := SphereMesh.new()
 	head_mesh.radius = HEAD_RADIUS
 	head_mesh.height = HEAD_RADIUS * 2.0
+	head_mesh.radial_segments = 32
+	head_mesh.rings = 16
 	var head := _mesh_instance(head_mesh, _skin_material)
 	head.position = Vector3(0.0, HEAD_Y, 0.0)
 	add_child(head)
@@ -63,19 +79,22 @@ func _ready() -> void:
 		var eye := _mesh_instance(eye_mesh, _eye_material)
 		eye.position = Vector3(0.07 * side, 0.03, -0.16)
 		head.add_child(eye)
-	_arm_left = _limb(Vector3(-SHOULDER_X, SHOULDER_Y, 0.0), ARM_SIZE, _skin_material)
-	_arm_right = _limb(Vector3(SHOULDER_X, SHOULDER_Y, 0.0), ARM_SIZE, _skin_material)
-	_leg_left = _limb(Vector3(-HIP_X, HIP_Y, 0.0), LEG_SIZE, _pants_material)
-	_leg_right = _limb(Vector3(HIP_X, HIP_Y, 0.0), LEG_SIZE, _pants_material)
+	_arm_left = _limb(Vector3(-SHOULDER_X, SHOULDER_Y, 0.0), ARM_SIZE, _skin_material, _skin_material, true)
+	_arm_right = _limb(Vector3(SHOULDER_X, SHOULDER_Y, 0.0), ARM_SIZE, _skin_material, _skin_material, true)
+	_leg_left = _limb(Vector3(-HIP_X, HIP_Y, 0.0), LEG_SIZE, _pants_material, _shoe_material, false)
+	_leg_right = _limb(Vector3(HIP_X, HIP_Y, 0.0), LEG_SIZE, _pants_material, _shoe_material, false)
 	_weapon_holder = Node3D.new()
 	_weapon_holder.position = Vector3(0.0, -ARM_SIZE.y, 0.0)
 	_arm_right.add_child(_weapon_holder)
 	apply_equipped()
 
 
-func _box_mesh(size: Vector3) -> BoxMesh:
-	var mesh := BoxMesh.new()
-	mesh.size = size
+func _round_mesh(radius: float) -> SphereMesh:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 32
+	mesh.rings = 16
 	return mesh
 
 
@@ -86,12 +105,29 @@ func _mesh_instance(mesh: Mesh, material: Material) -> MeshInstance3D:
 	return instance
 
 
-func _limb(pivot_position: Vector3, size: Vector3, material: Material) -> Node3D:
+# A rounded limb with a shoulder or hip ball on top and a hand or shoe at the end.
+func _limb(pivot_position: Vector3, size: Vector3, material: Material, end_material: Material, is_arm: bool) -> Node3D:
 	var pivot := Node3D.new()
 	pivot.position = pivot_position
-	var visual := _mesh_instance(_box_mesh(size), material)
+	var capsule := CapsuleMesh.new()
+	capsule.radius = size.x * 0.5
+	capsule.height = size.y
+	capsule.radial_segments = 24
+	capsule.rings = 8
+	var visual := _mesh_instance(capsule, material)
 	visual.position = Vector3(0.0, -size.y * 0.5, 0.0)
 	pivot.add_child(visual)
+	var joint := _mesh_instance(_round_mesh(size.x * 0.62), material)
+	pivot.add_child(joint)
+	if is_arm:
+		var hand := _mesh_instance(_round_mesh(size.x * 0.68), end_material)
+		hand.position = Vector3(0.0, -size.y + size.x * 0.1, 0.0)
+		pivot.add_child(hand)
+	else:
+		var shoe := _mesh_instance(_round_mesh(1.0), end_material)
+		shoe.scale = Vector3(size.x * 0.62, size.x * 0.42, size.x * 0.95)
+		shoe.position = Vector3(0.0, -size.y + size.x * 0.2, -size.x * 0.3)
+		pivot.add_child(shoe)
 	add_child(pivot)
 	return pivot
 
@@ -223,7 +259,44 @@ func play_emote(emote_id: String) -> bool:
 				_emote_tween.parallel().tween_property(_arm_right, "rotation:z", 0.4, 0.15)
 			_emote_tween.tween_property(_arm_left, "rotation", Vector3.ZERO, 0.2)
 			_emote_tween.parallel().tween_property(_arm_right, "rotation", Vector3.ZERO, 0.2)
+		"attack":
+			_emote_tween.tween_property(_arm_right, "rotation:x", 2.9, 0.18)
+			_emote_tween.parallel().tween_property(_arm_left, "rotation:x", 1.6, 0.18)
+			for i in 2:
+				_emote_tween.tween_property(_arm_right, "rotation:x", 1.2, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+				_emote_tween.parallel().tween_property(_arm_left, "rotation:x", 2.9, 0.12)
+				_emote_tween.tween_property(_arm_right, "rotation:x", 2.9, 0.16)
+				_emote_tween.parallel().tween_property(_arm_left, "rotation:x", 1.6, 0.16)
+			_emote_tween.tween_property(_arm_right, "rotation", Vector3.ZERO, 0.2)
+			_emote_tween.parallel().tween_property(_arm_left, "rotation", Vector3.ZERO, 0.2)
+		"follow_me":
+			_emote_tween.tween_property(_arm_right, "rotation:x", 2.2, 0.2)
+			for i in 3:
+				_emote_tween.tween_property(_arm_right, "rotation:x", 0.3, 0.22).set_trans(Tween.TRANS_SINE)
+				_emote_tween.tween_property(_arm_right, "rotation:x", 2.2, 0.22).set_trans(Tween.TRANS_SINE)
+			_emote_tween.tween_property(_arm_right, "rotation", Vector3.ZERO, 0.2)
+		"watch_out":
+			_emote_tween.tween_property(_arm_left, "rotation:x", 2.9, 0.15)
+			_emote_tween.parallel().tween_property(_arm_right, "rotation:x", 2.9, 0.15)
+			_emote_tween.parallel().tween_property(_arm_left, "rotation:z", 0.8, 0.15)
+			_emote_tween.parallel().tween_property(_arm_right, "rotation:z", -0.8, 0.15)
+			for i in 4:
+				_emote_tween.tween_property(_arm_left, "rotation:z", 0.45, 0.09)
+				_emote_tween.parallel().tween_property(_arm_right, "rotation:z", -0.45, 0.09)
+				_emote_tween.tween_property(_arm_left, "rotation:z", 0.8, 0.09)
+				_emote_tween.parallel().tween_property(_arm_right, "rotation:z", -0.8, 0.09)
+			_emote_tween.tween_property(_arm_left, "rotation", Vector3.ZERO, 0.2)
+			_emote_tween.parallel().tween_property(_arm_right, "rotation", Vector3.ZERO, 0.2)
+		"hello_mate":
+			_emote_tween.tween_property(_arm_right, "rotation:x", 2.6, 0.2)
+			_emote_tween.parallel().tween_property(_arm_left, "rotation:z", 0.7, 0.2)
+			for i in 3:
+				_emote_tween.tween_property(_arm_right, "rotation:z", -0.4, 0.14)
+				_emote_tween.tween_property(_arm_right, "rotation:z", 0.4, 0.14)
+			_emote_tween.tween_property(_arm_right, "rotation", Vector3.ZERO, 0.2)
+			_emote_tween.parallel().tween_property(_arm_left, "rotation", Vector3.ZERO, 0.2)
 	_emote_tween.finished.connect(func() -> void: _emoting = false)
+	EmoteVoice.play(self, emote_id)
 	return true
 
 

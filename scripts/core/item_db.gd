@@ -38,6 +38,10 @@ const ITEMS := {
 	"wave": {"category": "emote", "name": "Wave", "desc": "A friendly wave.", "color": Color("#9fe8ff")},
 	"spin": {"category": "emote", "name": "Spin", "desc": "A full victory spin.", "color": Color("#c9f27a")},
 	"cheer": {"category": "emote", "name": "Cheer", "desc": "Both arms up.", "color": Color("#ffc857")},
+	"attack": {"category": "emote", "name": "Attack!", "desc": "A battle cry with a fast strike. Says \"Attack!\".", "color": Color("#ff5a5f")},
+	"follow_me": {"category": "emote", "name": "Follow Me", "desc": "Waves your team along. Says \"Follow me\".", "color": Color("#38e8c6")},
+	"watch_out": {"category": "emote", "name": "Watch Out!", "desc": "Both arms up as a warning. Says \"Watch out!\".", "color": Color("#ffc857")},
+	"hello_mate": {"category": "emote", "name": "Hello Mate", "desc": "A friendly greeting. Says \"Hello mate\".", "color": Color("#9fe8ff")},
 }
 
 const LOCAL_PRICES := {

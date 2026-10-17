@@ -9,10 +9,16 @@ permissions:
 
 jobs:
   build:
+    name: build (${{ matrix.abi }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
     env:
       TAG: ${{ github.ref_name }}
+      ABI: ${{ matrix.abi }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,9 +41,13 @@ jobs:
           python3 tools/android/check_config.py
           python3 -m unittest discover -s tools/android -p 'test_*.py' -v
 
+      - name: Build only the ${{ matrix.abi }} architecture
+        run: python3 tools/android/select_abi.py "$ABI" --preset export_presets.cfg
+
       - uses: ./.github/actions/setup-android-export
 
       - name: Run logic tests
+        if: matrix.abi == 'arm64-v8a'
         run: |
           godot --headless --import || true
           godot --headless -s res://scripts/tests/logic_tests.gd
@@ -51,7 +61,7 @@ jobs:
           test -f build/BattleRift.apk
 
       - name: Verify the exported APK
-        run: tools/android/verify_apk.sh build/BattleRift.apk --version-name "${{ steps.version.outputs.version_name }}" --version-code "${{ steps.version.outputs.version_code }}"
+        run: tools/android/verify_apk.sh build/BattleRift.apk --abi "$ABI" --version-name "${{ steps.version.outputs.version_name }}" --version-code "${{ steps.version.outputs.version_code }}"
 
       - name: Sign the APK with the release key
         env:
@@ -71,12 +81,12 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           mkdir -p dist
           "$BT/zipalign" -p -f 4 build/BattleRift.apk "$RUNNER_TEMP/aligned.apk"
-          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "dist/BattleRift-${TAG}.apk" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out "dist/BattleRift-${TAG}-${ABI}.apk" "$RUNNER_TEMP/aligned.apk"
 
       - name: Verify the signed APK
         run: |
-          tools/android/verify_apk.sh "dist/BattleRift-${TAG}.apk" --signed --version-name "${{ steps.version.outputs.version_name }}" --version-code "${{ steps.version.outputs.version_code }}"
-          (cd dist && sha256sum "BattleRift-${TAG}.apk" | tee "BattleRift-${TAG}.apk.sha256")
+          tools/android/verify_apk.sh "dist/BattleRift-${TAG}-${ABI}.apk" --abi "$ABI" --signed --version-name "${{ steps.version.outputs.version_name }}" --version-code "${{ steps.version.outputs.version_code }}"
+          (cd dist && sha256sum "BattleRift-${TAG}-${ABI}.apk" | tee "BattleRift-${TAG}-${ABI}.apk.sha256")
 
       - name: Show the end of the export log
         if: failure()
@@ -85,7 +95,7 @@ jobs:
       - name: Upload the signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: battlerift-release
+          name: battlerift-release-${{ matrix.abi }}
           path: dist/
           if-no-files-found: error
 
@@ -100,10 +110,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: battlerift-release
+          pattern: battlerift-release-*
+          merge-multiple: true
           path: dist
 
       - name: Publish the GitHub Release
         run: |
-          gh release create "$TAG" "dist/BattleRift-${TAG}.apk" "dist/BattleRift-${TAG}.apk.sha256" \
+          ls -l dist
+          test "$(find dist -name "*.apk" | wc -l)" -eq 4
+          gh release create "$TAG" dist/*.apk dist/*.sha256 \
             --repo "$GITHUB_REPOSITORY" --verify-tag --title "BattleRift $TAG" --generate-notes

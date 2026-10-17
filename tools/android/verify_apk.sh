@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Verify an exported APK against tools/android/toolchain.env.
 #
-# Usage: verify_apk.sh APK [--version-name NAME --version-code CODE] [--signed]
+# Usage: verify_apk.sh APK [--abi ABI] [--version-name NAME --version-code CODE] [--signed]
 # Needs ANDROID_HOME and the variables from toolchain.env in the environment.
 set -uo pipefail
 
-APK="${1:?Usage: verify_apk.sh APK [--version-name NAME --version-code CODE] [--signed]}"
+APK="${1:?Usage: verify_apk.sh APK [--abi ABI] [--version-name NAME --version-code CODE] [--signed]}"
 shift
 EXPECT_NAME=""
 EXPECT_CODE=""
+EXPECT_ABI=""
 CHECK_SIGNATURE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version-name) EXPECT_NAME="${2:?missing value}"; shift 2 ;;
     --version-code) EXPECT_CODE="${2:?missing value}"; shift 2 ;;
+    --abi) EXPECT_ABI="${2:?missing value}"; shift 2 ;;
     --signed) CHECK_SIGNATURE=1; shift ;;
     *) echo "::error::Unknown argument $1"; exit 2 ;;
   esac
@@ -55,7 +57,11 @@ grep -q "^package: name='$ANDROID_PACKAGE'" "$BADGING" || fail "Package identifi
 grep -Eq "^(minSdkVersion|sdkVersion):'$ANDROID_MIN_SDK'" "$BADGING" || fail "minSdkVersion is not $ANDROID_MIN_SDK"
 grep -q "^targetSdkVersion:'$ANDROID_TARGET_SDK'" "$BADGING" || fail "targetSdkVersion is not $ANDROID_TARGET_SDK"
 grep -q "compileSdkVersion='$ANDROID_COMPILE_SDK'" "$BADGING" || echo "::warning::compileSdkVersion $ANDROID_COMPILE_SDK was not found in the APK manifest"
-grep -q "^native-code:.*'arm64-v8a'" "$BADGING" || fail "The APK has no arm64-v8a native code"
+if [ -n "$EXPECT_ABI" ]; then
+  grep -qx "native-code: '$EXPECT_ABI'" "$BADGING" || fail "The APK must contain native code for $EXPECT_ABI only"
+else
+  grep -q "^native-code:.*'arm64-v8a'" "$BADGING" || fail "The APK has no arm64-v8a native code"
+fi
 grep -E "enableOnBackInvokedCallback.*(=false|=\(type 0x12\)0x0)" "$MANIFEST" > /dev/null || fail "android:enableOnBackInvokedCallback=false is missing from the APK manifest"
 grep -q "PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" "$MANIFEST" || fail "PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY is missing from the APK manifest"
 grep -q "android.permission.INTERNET" "$BADGING" || fail "The INTERNET permission is missing from the APK"

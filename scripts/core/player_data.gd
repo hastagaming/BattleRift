@@ -226,6 +226,8 @@ func set_setting(key: String, value: Variant) -> void:
 func owns(category: String, item_id: String) -> bool:
 	if not is_signed_in or not data["inventory"].has(category):
 		return false
+	if category == "emote" and item_id in CharacterModel.STARTER_EMOTES:
+		return true
 	return item_id in data["inventory"][category]
 
 

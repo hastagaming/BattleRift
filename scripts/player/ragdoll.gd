@@ -32,24 +32,25 @@ func is_settled() -> bool:
 func _build(origin: Transform3D, velocity: Vector3, skin: Color, accent: Color) -> void:
 	var torso_box := BoxShape3D.new()
 	torso_box.size = CharacterModel.TORSO_SIZE
-	_torso = _create_body("Torso", torso_box, _box_mesh(CharacterModel.TORSO_SIZE), Vector3(0.0, CharacterModel.TORSO_Y, 0.0), origin, accent, 3.0, velocity)
+	_torso = _create_body("Torso", torso_box, _capsule_mesh(CharacterModel.TORSO_SIZE.z * 0.5, CharacterModel.TORSO_SIZE.y + 0.04), Vector3(0.0, CharacterModel.TORSO_Y, 0.0), origin, accent, 3.0, velocity)
 	var head_shape := SphereShape3D.new()
 	head_shape.radius = CharacterModel.HEAD_RADIUS
 	var head_mesh := SphereMesh.new()
 	head_mesh.radius = CharacterModel.HEAD_RADIUS
 	head_mesh.height = CharacterModel.HEAD_RADIUS * 2.0
 	var head := _create_body("Head", head_shape, head_mesh, Vector3(0.0, CharacterModel.HEAD_Y, 0.0), origin, skin, 1.0, velocity)
+	(_torso.get_child(1) as MeshInstance3D).scale = Vector3(CharacterModel.TORSO_SIZE.x / CharacterModel.TORSO_SIZE.z, 1.0, 1.0)
 	_join(_torso, head, origin, Vector3(0.0, 1.42, 0.0), 40.0, 40.0)
 	var arm_y := CharacterModel.SHOULDER_Y - CharacterModel.ARM_SIZE.y * 0.5
 	var leg_y := CharacterModel.HIP_Y - CharacterModel.LEG_SIZE.y * 0.5
 	for side in [-1.0, 1.0]:
 		var arm_shape := BoxShape3D.new()
 		arm_shape.size = CharacterModel.ARM_SIZE
-		var arm := _create_body("Arm%d" % int(side), arm_shape, _box_mesh(CharacterModel.ARM_SIZE), Vector3(CharacterModel.SHOULDER_X * side, arm_y, 0.0), origin, skin, 0.8, velocity)
+		var arm := _create_body("Arm%d" % int(side), arm_shape, _capsule_mesh(CharacterModel.ARM_SIZE.x * 0.5, CharacterModel.ARM_SIZE.y), Vector3(CharacterModel.SHOULDER_X * side, arm_y, 0.0), origin, skin, 0.8, velocity)
 		_join(_torso, arm, origin, Vector3(CharacterModel.SHOULDER_X * side, CharacterModel.SHOULDER_Y, 0.0), 80.0, 40.0)
 		var leg_shape := BoxShape3D.new()
 		leg_shape.size = CharacterModel.LEG_SIZE
-		var leg := _create_body("Leg%d" % int(side), leg_shape, _box_mesh(CharacterModel.LEG_SIZE), Vector3(CharacterModel.HIP_X * side, leg_y, 0.0), origin, accent.darkened(0.55), 1.2, velocity)
+		var leg := _create_body("Leg%d" % int(side), leg_shape, _capsule_mesh(CharacterModel.LEG_SIZE.x * 0.5, CharacterModel.LEG_SIZE.y), Vector3(CharacterModel.HIP_X * side, leg_y, 0.0), origin, accent.darkened(0.55), 1.2, velocity)
 		_join(_torso, leg, origin, Vector3(CharacterModel.HIP_X * side, CharacterModel.HIP_Y, 0.0), 50.0, 20.0)
 	for i in _bodies.size():
 		for j in range(i + 1, _bodies.size()):
@@ -57,9 +58,12 @@ func _build(origin: Transform3D, velocity: Vector3, skin: Color, accent: Color) 
 	_torso.angular_velocity = Vector3(velocity.z, 0.0, -velocity.x) * 0.4
 
 
-func _box_mesh(size: Vector3) -> BoxMesh:
-	var mesh := BoxMesh.new()
-	mesh.size = size
+func _capsule_mesh(radius: float, height: float) -> CapsuleMesh:
+	var mesh := CapsuleMesh.new()
+	mesh.radius = radius
+	mesh.height = height
+	mesh.radial_segments = 24
+	mesh.rings = 8
 	return mesh
 
 

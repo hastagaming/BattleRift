@@ -23,8 +23,13 @@ permissions:
 
 jobs:
   build:
+    name: build (${{ matrix.abi }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
     steps:
       - uses: actions/checkout@v4
 
@@ -36,9 +41,13 @@ jobs:
           python3 tools/android/check_config.py
           python3 -m unittest discover -s tools/android -p 'test_*.py' -v
 
+      - name: Build only the ${{ matrix.abi }} architecture
+        run: python3 tools/android/select_abi.py "${{ matrix.abi }}" --preset export_presets.cfg
+
       - uses: ./.github/actions/setup-android-export
 
       - name: Run logic tests
+        if: matrix.abi == 'arm64-v8a'
         run: |
           godot --headless --import || true
           godot --headless -s res://scripts/tests/logic_tests.gd
@@ -48,16 +57,17 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
-          godot --headless --verbose --export-${{ inputs.variant || 'release' }} "Android" build/BattleRift.apk 2>&1 | tee export.log
-          test -f build/BattleRift.apk
+          godot --headless --verbose --export-${{ inputs.variant || 'release' }} "Android" build/BattleRift-${{ matrix.abi }}.apk 2>&1 | tee export.log
+          test -f build/BattleRift-${{ matrix.abi }}.apk
 
       - name: Verify the APK
-        run: tools/android/verify_apk.sh build/BattleRift.apk
+        run: tools/android/verify_apk.sh build/BattleRift-${{ matrix.abi }}.apk --abi "${{ matrix.abi }}"
 
       - name: Report native library page alignment
+        if: matrix.abi == 'arm64-v8a' || matrix.abi == 'x86_64'
         run: |
-          mkdir -p elf && unzip -q -o build/BattleRift.apk 'lib/arm64-v8a/*.so' -d elf
-          for so in elf/lib/arm64-v8a/*.so; do
+          mkdir -p elf && unzip -q -o build/BattleRift-${{ matrix.abi }}.apk 'lib/${{ matrix.abi }}/*.so' -d elf
+          for so in elf/lib/${{ matrix.abi }}/*.so; do
             ALIGN=$(readelf -lW "$so" | awk '/LOAD/{print $NF; exit}')
             echo "$(basename "$so"): LOAD alignment $ALIGN"
             if [ "$((ALIGN))" -lt 16384 ]; then
@@ -73,13 +83,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: export-log
+          name: export-log-${{ matrix.abi }}
           path: export.log
           if-no-files-found: ignore
 
       - name: Upload the test APK
         uses: actions/upload-artifact@v4
         with:
-          name: battlerift-apk
-          path: build/BattleRift.apk
+          name: battlerift-apk-${{ matrix.abi }}
+          path: build/BattleRift-${{ matrix.abi }}.apk
           if-no-files-found: error
