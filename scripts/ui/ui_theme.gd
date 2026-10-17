@@ -44,6 +44,35 @@ static func tint_button(button: Button, color: Color) -> void:
 	button.add_theme_color_override("font_pressed_color", BG)
 
 
+# A small rounded label, for facts such as "Cooldown 12s" or "LOCKED".
+static func chip(text: String, background: Color, foreground: Color = BG) -> PanelContainer:
+	var holder := PanelContainer.new()
+	holder.add_theme_stylebox_override("panel", _box(background, 8, 8.0, 1.0))
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", foreground)
+	holder.add_child(label)
+	return holder
+
+
+# A round badge with one letter, used as an avatar.
+static func orb(letter: String, color: Color, size: float = 56.0) -> PanelContainer:
+	var holder := PanelContainer.new()
+	var box := _box(SURFACE_HOVER, int(size / 2.0), 0.0, 0.0, color, 3)
+	holder.add_theme_stylebox_override("panel", box)
+	holder.custom_minimum_size = Vector2(size, size)
+	holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var label := Label.new()
+	label.text = letter
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", int(size * 0.5))
+	label.add_theme_color_override("font_color", color)
+	holder.add_child(label)
+	return holder
+
+
 static func build() -> Theme:
 	var theme := Theme.new()
 	theme.default_font_size = 22

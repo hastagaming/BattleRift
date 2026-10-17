@@ -31,6 +31,7 @@ func _initialize() -> void:
 	_test_pet_sounds()
 	_test_emotes_and_voice()
 	_test_login_art()
+	_test_pet_logic()
 	_test_net_address()
 	_test_discovery_reply()
 	_test_enet_loopback()
@@ -587,6 +588,26 @@ func _test_login_art() -> void:
 	_check(texture != null and texture.get_width() == 1280 and texture.get_height() == 720, "the login SVG is drawn at 1280 by 720")
 	var wide := LoginArt.hero_texture(Vector2(2400.0, 1080.0))
 	_check(wide != null and wide.get_width() > 1280, "the login SVG is drawn sharper on a larger screen")
+
+
+func _test_pet_logic() -> void:
+	for pet_id in PetDb.ORDER:
+		var pet := PetDb.get_pet(pet_id)
+		_check(not PetLogic.stat_chips(pet).is_empty() and PetLogic.kind_label(pet) != "PET", "%s shows its kind and at least one fact" % pet_id)
+	var volt := PetLogic.stat_chips(PetDb.get_pet("pet_volt"))
+	_check("Cooldown 12s" in volt and "Radius 3.2m" in volt and "Damage 3" in volt and "Knockback 4" in volt, "Volt shows cooldown, radius, damage and knockback")
+	var aero := PetLogic.stat_chips(PetDb.get_pet("pet_aero"))
+	_check("Damage 0" not in aero and "Damage" not in " ".join(aero), "a pet that does no damage does not list damage")
+	_check("Slows 50% for 3s" in PetLogic.stat_chips(PetDb.get_pet("pet_frost")), "Frost shows how much and how long it slows")
+	_check("Pulls in" in PetLogic.stat_chips(PetDb.get_pet("pet_riftling")), "Riftling says it pulls players in")
+	_check(PetLogic.stat_chips(PetDb.get_pet("pet_falcon")) == ["+60% air control", "-18% fall gravity"], "Falcon lists its passive bonuses")
+	_check(PetLogic.stat_chips(PetDb.get_pet("pet_catty")) == ["-40% knocked down time", "-25% hit stun"], "Catty lists its passive bonuses")
+	_check("Wall 6s" in PetLogic.stat_chips(PetDb.get_pet("pet_creaton")), "Creaton shows how long its wall lasts")
+	var progress := PetLogic.collection_progress(["pet_volt", "pet_catty", "not_a_pet"])
+	_check(int(progress["owned"]) == 2 and int(progress["total"]) == PetDb.ORDER.size(), "collection progress counts only real pets")
+	var order := PetLogic.collection_order(["pet_catty", "pet_volt"])
+	_check(order.size() == PetDb.ORDER.size() and order[0] == "pet_volt" and order[1] == "pet_catty" and order[2] == "pet_blaze", "owned pets come first, then the rest in the usual order")
+	_check(PetLogic.stat_chips({}).is_empty(), "an unknown pet has no facts")
 
 
 func _test_net_address() -> void:

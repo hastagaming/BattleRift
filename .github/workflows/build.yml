@@ -52,6 +52,7 @@ jobs:
           godot --headless --import || true
           godot --headless -s res://scripts/tests/logic_tests.gd
           godot --headless -s res://scripts/tests/social_smoke.gd
+          godot --headless -s res://scripts/tests/customize_smoke.gd
 
       - name: Export the test APK
         run: |

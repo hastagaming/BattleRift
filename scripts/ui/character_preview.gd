@@ -31,14 +31,14 @@ func _ready() -> void:
 	var camera := Camera3D.new()
 	camera.fov = 32.0
 	_viewport.add_child(camera)
-	camera.look_at_from_position(Vector3(0.0, 1.15, 4.6), Vector3(0.0, 0.95, 0.0))
+	camera.look_at_from_position(Vector3(0.0, 1.15, 4.9), Vector3(0.0, 0.95, 0.0))
 	_pivot = Node3D.new()
 	_pivot.rotation.y = PI
 	_viewport.add_child(_pivot)
 	model = CharacterModel.new()
 	_pivot.add_child(model)
 	_pet = PetNode.new()
-	_pet.idle_position = Vector3(0.85, 1.2, 0.1)
+	_pet.idle_position = Vector3(0.65, 1.15, 0.1)
 	_pivot.add_child(_pet)
 	refresh()
 
