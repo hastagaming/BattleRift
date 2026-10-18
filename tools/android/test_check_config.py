@@ -27,6 +27,12 @@ class CheckConfigTest(unittest.TestCase):
     def test_committed_secret(self):
         self.assertEqual(len(cc.check(ENV, dict(OPTIONS, **{"keystore/release_password": "x"}), PLUGIN)), 1)
 
+    def test_language_packs_must_be_exported(self):
+        self.assertEqual(cc.check_language_packs('include_filter="i18n/*.toml"\n'), [])
+        self.assertEqual(cc.check_language_packs('include_filter="a/*.x, i18n/*.toml"\n'), [])
+        self.assertEqual(len(cc.check_language_packs('include_filter=""\n')), 1)
+        self.assertEqual(len(cc.check_language_packs('name="Android"\n')), 1)
+
     def test_arm64_missing(self):
         self.assertEqual(len(cc.check(ENV, dict(OPTIONS, **{"architectures/arm64-v8a": "false"}), PLUGIN)), 1)
 

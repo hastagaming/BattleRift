@@ -32,7 +32,12 @@ func _initialize() -> void:
 	_test_emotes_and_voice()
 	_test_login_art()
 	_test_pet_logic()
-	_test_net_address()
+	_test_toml_lite()
+	_test_plural_rules()
+	_test_pack_validation()
+	_test_localization()
+	_test_shipped_languages()
+    _test_net_address()
 	_test_discovery_reply()
 	_test_enet_loopback()
 	_test_multiplayer_peer_api()
@@ -608,6 +613,165 @@ func _test_pet_logic() -> void:
 	var order := PetLogic.collection_order(["pet_catty", "pet_volt"])
 	_check(order.size() == PetDb.ORDER.size() and order[0] == "pet_volt" and order[1] == "pet_catty" and order[2] == "pet_blaze", "owned pets come first, then the rest in the usual order")
 	_check(PetLogic.stat_chips({}).is_empty(), "an unknown pet has no facts")
+
+
+func _pack_text(code: String, rule: String, extra: String = "", direction: String = "ltr") -> String:
+	return '[meta]\nformat = 1\ncode = "%s"\nname = "%s"\nname_en = "%s"\nversion = 1\ndirection = "%s"\nplural_rule = "%s"\ndecimal_separator = "."\ngroup_separator = ","\ndate_order = "dmy"\ndate_separator = "/"\nfallback = "en"\n\n[strings]\n%s' % [code, code, code, direction, rule, extra]
+
+
+func _test_toml_lite() -> void:
+	var good := TomlLite.parse('\ufeff# comment\nformat = 1\nflag = true\nname = "A \\"quoted\\" \\u00e9 line\\n"\nitems = ["a", "b",]\n[strings]\n"a.b" = "x" # note\r\n')
+	var root_table: Dictionary = good["tables"][""]
+	_check((good["errors"] as Array).is_empty(), "a valid TOML text has no errors")
+	_check(int(root_table["format"]) == 1 and root_table["flag"] == true, "integers and booleans are read")
+	_check(String(root_table["name"]) == "A \"quoted\" \u00e9 line\n", "string escapes are read, including \\u")
+	_check(root_table["items"] == ["a", "b"], "arrays of strings are read")
+	_check(String(good["tables"]["strings"]["a.b"]) == "x", "quoted keys and comments after a value are read")
+	for broken in ['a = "x', 'a = nope', 'a = "x\\q"', 'a = "x" junk', '[t]\n[t]', 'a = 1\na = 2', 'a = [1, 2]', 'a = "\\u12"', '"" = "x"', 'bad key = "x"', '[[arr]]']:
+		_check(not (TomlLite.parse(broken)["errors"] as Array).is_empty(), "TOML text is refused: %s" % broken.replace("\n", " "))
+
+
+func _test_plural_rules() -> void:
+	var samples := {
+		"one_other": {1: "one", 0: "other", 2: "other", 1.5: "other"},
+		"one_other_zero_one": {0: "one", 1: "one", 1.5: "one", 2: "other"},
+		"east_slavic": {1: "one", 2: "few", 4: "few", 5: "many", 11: "many", 12: "many", 21: "one", 22: "few", 25: "many", 101: "one", 111: "many", 1.5: "other"},
+		"polish": {1: "one", 2: "few", 5: "many", 12: "many", 22: "few", 1.5: "other"},
+		"czech": {1: "one", 3: "few", 5: "other", 1.5: "many"},
+		"arabic": {0: "zero", 1: "one", 2: "two", 3: "few", 10: "few", 11: "many", 99: "many", 100: "other", 102: "other", 103: "few", 111: "many"},
+		"none": {0: "other", 1: "other", 5: "other"},
+	}
+	var all_right := true
+	for rule in samples:
+		for count in samples[rule]:
+			if LocPlural.category(rule, float(count)) != String(samples[rule][count]):
+				all_right = false
+				print("  plural mismatch: %s %s -> %s" % [rule, str(count), LocPlural.category(rule, float(count))])
+	_check(all_right, "plural categories follow the rules of each language family")
+	var complete := true
+	for rule in LocPlural.RULES:
+		for count in [0, 1, 2, 3, 5, 11, 21, 100, 1.5]:
+			if LocPlural.category(rule, float(count)) not in LocPlural.categories_for(rule):
+				complete = false
+	_check(complete, "every plural rule only returns categories it declares")
+
+
+func _test_pack_validation() -> void:
+	var good := LocPack.from_text(_pack_text("en", "one_other", '"a.b" = "Hi {name}"\n"c.one" = "{count} item"\n"c.other" = "{count} items"\n'))
+	_check(bool(good["ok"]), "a valid pack is accepted")
+	var cases := {
+		"a wrong format": _pack_text("en", "one_other").replace("format = 1", "format = 2"),
+		"a code with a path in it": _pack_text("../evil", "one_other"),
+		"an uppercase code": _pack_text("EN", "one_other"),
+		"an unknown plural rule": _pack_text("xx", "klingon"),
+		"an unbalanced placeholder": _pack_text("en", "one_other", '"a.b" = "Hi {name"\n'),
+		"a placeholder with capitals": _pack_text("en", "one_other", '"a.b" = "Hi {Name}"\n'),
+		"a bad key": _pack_text("en", "one_other", '"A.B" = "x"\n'),
+		"a tab in a value": _pack_text("en", "one_other", '"a.b" = "x\\ty"\n'),
+		"a missing plural form": _pack_text("ru", "east_slavic", '"c.one" = "x"\n"c.other" = "y"\n'),
+		"an extra table": _pack_text("en", "one_other") + "[scripts]\nrun = \"x\"\n",
+		"a bad direction": _pack_text("en", "one_other", "", "up"),
+		"no meta table": "[strings]\n\"a.b\" = \"x\"\n",
+		"a value that is too long": _pack_text("en", "one_other", '"a.b" = "%s"\n' % "x".repeat(LocPack.MAX_VALUE_LENGTH + 1)),
+		"a text that is too big": _pack_text("en", "one_other", "# %s\n" % "x".repeat(LocPack.MAX_TEXT_BYTES)),
+	}
+	for label in cases:
+		var result := LocPack.from_text(String(cases[label]))
+		_check(not bool(result["ok"]) and result["pack"] == null, "a pack with %s is refused" % label)
+	_check(LocPack.placeholders_of("{a} and {b_2}") == ["a", "b_2"], "placeholders are listed")
+	_check(LocPack.placeholders_of("{a") == null and LocPack.placeholders_of("}") == null, "unbalanced braces are detected")
+
+
+func _test_localization() -> void:
+	Loc.reset_for_tests()
+	var texts := {
+		"en": _pack_text("en", "one_other", '"a.hello" = "Hello {name}"\n"a.only_en" = "Only in English"\n"a.items.one" = "{count} item"\n"a.items.other" = "{count} items"\n'),
+		"id": _pack_text("id", "none", '"a.hello" = "Halo {name}"\n"a.items.other" = "{count} barang"\n').replace('decimal_separator = "."', 'decimal_separator = ","').replace('group_separator = ","', 'group_separator = "."'),
+		"ru": _pack_text("ru", "east_slavic", '"a.items.one" = "{count} штука"\n"a.items.few" = "{count} штуки"\n"a.items.many" = "{count} штук"\n"a.items.other" = "{count} штуки"\n'),
+		"ja": _pack_text("ja", "none", '"a.hello" = "こんにちは {name}"\n').replace('date_order = "dmy"', 'date_order = "ymd"'),
+		"ar": _pack_text("ar", "arabic", '"a.hello" = "مرحبا {name}"\n"a.items.zero" = "z"\n"a.items.one" = "o"\n"a.items.two" = "t"\n"a.items.few" = "f"\n"a.items.many" = "m"\n"a.items.other" = "x"\n', "rtl"),
+		"zh-Hant": _pack_text("zh-Hant", "none", '"a.hello" = "你好 {name}"\n'),
+	}
+	for code in texts:
+		var result := LocPack.from_text(String(texts[code]))
+		_check(bool(result["ok"]) and Loc.register_pack(result["pack"]), "the %s test pack loads" % code)
+	_check(Loc.set_language("id", false) and Loc.current() == "id", "the language can be switched")
+	_check(not Loc.set_language("xx", false) and Loc.current() == "id", "an unknown language is refused and nothing changes")
+	_check(Loc.t("a.hello", {"name": "Rina"}) == "Halo Rina", "a text is translated with its {placeholder}")
+	_check(Loc.t("a.only_en") == "Only in English", "a missing text falls back to English")
+	var missing := Loc.t("a.nowhere_at_all")
+	_check(missing != "a.nowhere_at_all" and not missing.contains(".") and missing == "Nowhere at all", "a key nobody defines shows a readable phrase, not the raw key")
+	_check(Loc.n("a.items", 5) == "5 barang" and Loc.n("a.items", 1) == "1 barang", "a language without plurals uses one form")
+	Loc.set_language("en", false)
+	_check(Loc.n("a.items", 1) == "1 item" and Loc.n("a.items", 2) == "2 items", "English plurals pick one or other")
+	_check(Loc.n("a.items", 1234) == "1,234 items", "the count is formatted for the language")
+	Loc.set_language("ru", false)
+	_check(Loc.n("a.items", 21) == "21 штука" and Loc.n("a.items", 3) == "3 штуки" and Loc.n("a.items", 11) == "11 штук", "Russian plurals follow the Slavic rule")
+	_check(Loc.t("a.hello", {"name": "Dan"}) == "Hello Dan", "a language that lacks a key falls back to English")
+	Loc.set_language("ar", false)
+	_check(Loc.is_rtl() and Loc.n("a.items", 0) == "z" and Loc.n("a.items", 2) == "t" and Loc.n("a.items", 11) == "m", "Arabic is right to left and has six plural forms")
+	var arabic_screen := Control.new()
+	Loc.apply_to(arabic_screen)
+	_check(arabic_screen.layout_direction == Control.LAYOUT_DIRECTION_RTL, "a screen is mirrored for a right to left language")
+	arabic_screen.free()
+	Loc.set_language("en", false)
+	_check(not Loc.is_rtl(), "English is left to right")
+	var english_screen := Control.new()
+	Loc.apply_to(english_screen)
+	_check(english_screen.layout_direction == Control.LAYOUT_DIRECTION_LTR, "a screen is not mirrored for a left to right language")
+	english_screen.free()
+	_check(Loc.fallback_chain("zh-Hant") == ["zh-Hant", "en"], "the fallback chain ends with English")
+	Loc.set_language("id", false)
+	_check(Loc.format_number(1234567.5, 1) == "1.234.567,5", "numbers use the group and decimal marks of Indonesian")
+	Loc.set_language("en", false)
+	_check(Loc.format_number(1234567.5, 1) == "1,234,567.5" and Loc.format_number(-1234) == "-1,234" and Loc.format_number(999.5) == "1,000" and Loc.format_number(0) == "0", "numbers use the marks of English")
+	var date_regex := RegEx.new()
+	date_regex.compile("^\\d{2}/\\d{2}/\\d{4}$")
+	_check(date_regex.search(Loc.format_date(86400 * 400)) != null, "English dates are month, day, year")
+	Loc.set_language("ja", false)
+	date_regex.compile("^\\d{4}/\\d{2}/\\d{2}$")
+	_check(date_regex.search(Loc.format_date(86400 * 400)) != null, "Japanese dates are year, month, day")
+	_check(Loc.format_clock(125) == "2:05" and Loc.format_clock(-4) == "0:00", "a clock time is minutes and seconds")
+	_check(Loc.match_device_locale("ja_JP") == "ja" and Loc.match_device_locale("in_ID") == "id" and Loc.match_device_locale("ja-JP") == "ja", "a device locale, including the old Android code in, is matched to an installed pack")
+	_check(Loc.match_device_locale("zh_TW") == "zh-Hant" and Loc.match_device_locale("zh_CN") == "" and Loc.match_device_locale("xx_XX") == "" and Loc.match_device_locale("") == "", "Chinese variants and unknown locales are matched safely")
+	var newer := LocPack.from_text(_pack_text("ja", "none", '"a.hello" = "新しい {name}"\n').replace("version = 1", "version = 2"))
+	var same := LocPack.from_text(_pack_text("ja", "none", '"a.hello" = "同じ {name}"\n'))
+	_check(Loc.register_pack(newer["pack"]) and not Loc.register_pack(same["pack"]), "only a newer pack version replaces an installed pack")
+	var refused := Loc.install_user_pack(_pack_text("en", "klingon"))
+	_check(not bool(refused["ok"]) and not (refused["errors"] as Array).is_empty(), "a bad pack is refused and nothing is saved")
+	_check(not Loc.adopt_account_language("xx") and not Loc.adopt_account_language(""), "an unknown account language is ignored")
+	_check(Loc.language_info("ar")["direction"] == "rtl" and Loc.language_info("nope").is_empty(), "language info is available for installed packs only")
+
+
+func _test_shipped_languages() -> void:
+	Loc.initialize(true)
+	for code in ["en", "id", "de", "ms", "ja"]:
+		_check(Loc.has_language(code), "the shipped language %s is available" % code)
+	var english_keys := Loc.keys_of("en")
+	var raw_key_visible := false
+	var empty_text := false
+	for code in ["en", "id", "de", "ms", "ja"]:
+		Loc.set_language(code, false)
+		for key in english_keys:
+			var suffix := key.get_slice(".", key.get_slice_count(".") - 1)
+			if suffix in LocPlural.CATEGORIES:
+				continue
+			var shown := Loc.t(key, {"provider": "Google"})
+			if shown == key or shown.contains("{"):
+				raw_key_visible = true
+			if shown.strip_edges().is_empty():
+				empty_text = true
+	_check(not raw_key_visible, "no shipped language shows a raw key or an unfilled placeholder")
+	_check(not empty_text, "no shipped language has an empty text")
+	Loc.set_language("ja", false)
+	_check(Loc.t("login.subtitle") == "サインインして Rift に入ろう" and Loc.n("language.available_count", 5) == "5 言語に対応", "Japanese texts and counts are shown")
+	Loc.set_language("de", false)
+	_check(Loc.n("language.available_count", 1) == "1 Sprache verfügbar" and Loc.n("language.available_count", 5) == "5 Sprachen verfügbar", "German plurals are correct")
+	Loc.set_language("id", false)
+	_check(Loc.t("login.continue_with", {"provider": "Google"}) == "Lanjutkan dengan Google", "Indonesian text takes the provider name")
+	Loc.set_language("en", false)
+	_check(Loc.t("common.back") == "Back" and Loc.n("language.available_count", 5) == "5 languages available", "English texts are shown")
+	Loc.initialize(true)
 
 
 func _test_net_address() -> void:

@@ -11,6 +11,7 @@ var _cancel_button: Button
 func _ready() -> void:
 	UiTheme.ensure(get_tree())
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	Loc.apply_to(self)
 	var background := ColorRect.new()
 	background.color = UiTheme.BG
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -54,13 +55,13 @@ func _ready() -> void:
 	title.add_theme_constant_override("outline_size", 10)
 	column.add_child(title)
 	var subtitle := Label.new()
-	subtitle.text = "Sign in to enter the Rift"
+	subtitle.text = Loc.t("login.subtitle")
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_color_override("font_color", UiTheme.MUTED)
 	column.add_child(subtitle)
 	for provider in PlayerData.PROVIDERS:
 		var button := Button.new()
-		button.text = "Continue with %s" % PROVIDER_LABELS[provider]
+		button.text = Loc.t("login.continue_with", {"provider": PROVIDER_LABELS[provider]})
 		button.custom_minimum_size = Vector2(0, 58)
 		UiTheme.tint_button(button, PROVIDER_COLORS.get(provider, UiTheme.ACCENT))
 		button.pressed.connect(_on_provider_pressed.bind(provider))
@@ -68,7 +69,7 @@ func _ready() -> void:
 		_buttons.append(button)
 	if OS.is_debug_build():
 		var dev_button := Button.new()
-		dev_button.text = "Developer Local Account (debug only)"
+		dev_button.text = Loc.t("login.dev_account")
 		dev_button.custom_minimum_size = Vector2(0, 54)
 		UiTheme.tint_button(dev_button, UiTheme.GOLD)
 		dev_button.pressed.connect(_on_dev_pressed)
@@ -80,14 +81,14 @@ func _ready() -> void:
 	_status.add_theme_color_override("font_color", UiTheme.MUTED)
 	column.add_child(_status)
 	_cancel_button = Button.new()
-	_cancel_button.text = "Cancel"
+	_cancel_button.text = Loc.t("common.cancel")
 	_cancel_button.custom_minimum_size = Vector2(0, 48)
 	_cancel_button.visible = false
 	_cancel_button.pressed.connect(AuthService.cancel)
 	column.add_child(_cancel_button)
 	AuthService.state_changed.connect(_on_state_changed)
 	if not AuthService.is_backend_configured():
-		_set_status("Supabase is not configured. Set supabase_url and supabase_anon_key in project.godot.", false)
+		_set_status(Loc.t("login.backend_missing"), false)
 	card.modulate.a = 0.0
 	create_tween().tween_property(card, "modulate:a", 1.0, 0.5)
 
@@ -107,6 +108,7 @@ func _on_state_changed(busy: bool, message: String, is_error: bool) -> void:
 func _on_provider_pressed(provider: String) -> void:
 	var result: Dictionary = await AuthService.sign_in_with(provider)
 	if bool(result["ok"]):
+		LanguageSync.apply_account()
 		Router.go(TutorialStore.landing_scene())
 
 

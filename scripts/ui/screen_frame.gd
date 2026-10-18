@@ -17,6 +17,7 @@ func _ready() -> void:
 		Router.go(Router.AUTH)
 		return
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	Loc.apply_to(self)
 	var background := ColorRect.new()
 	background.color = UiTheme.BG
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -48,7 +49,7 @@ func _ready() -> void:
 	_br_label.add_theme_color_override("font_color", UiTheme.ACCENT)
 	header.add_child(_br_label)
 	var back := Button.new()
-	back.text = "Back"
+	back.text = Loc.t("common.back")
 	back.custom_minimum_size = Vector2(0.0, 48.0)
 	back.pressed.connect(_on_back_pressed)
 	header.add_child(back)

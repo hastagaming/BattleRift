@@ -75,6 +75,7 @@ static func orb(letter: String, color: Color, size: float = 56.0) -> PanelContai
 
 static func build() -> Theme:
 	var theme := Theme.new()
+    theme.default_font = Loc.make_font()
 	theme.default_font_size = 22
 	theme.set_stylebox("normal", "Button", _box(SURFACE, 16, 18.0, 10.0, BORDER, 2, 5, 6))
 	theme.set_stylebox("hover", "Button", _box(SURFACE_HOVER, 16, 18.0, 10.0, ACCENT_DIM, 2, 5, 6))

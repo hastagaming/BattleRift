@@ -38,6 +38,15 @@ def gradle_number(text, name):
     return int(match.group(1)) if match else None
 
 
+def check_language_packs(preset_text):
+    """The language packs are .toml files, which Godot only exports when include_filter lists them."""
+    match = re.search(r'^include_filter="([^"]*)"', preset_text, flags=re.MULTILINE)
+    patterns = [p.strip() for p in (match.group(1) if match else "").split(",")]
+    if "i18n/*.toml" not in patterns:
+        return ['export_presets.cfg include_filter must contain "i18n/*.toml". Without it the APK has no language packs.']
+    return []
+
+
 def check(env, options, plugin_gradle):
     errors = []
     expect = {
@@ -70,6 +79,8 @@ def main():
     with open(os.path.join(ROOT, "android-plugin", "battlerift-notify", "build.gradle.kts"), encoding="utf-8") as handle:
         plugin_gradle = handle.read()
     errors = check(env, options, plugin_gradle)
+    with open(os.path.join(ROOT, "export_presets.cfg"), encoding="utf-8") as handle:
+        errors.extend(check_language_packs(handle.read()))
     for error in errors:
         print("::error::%s" % error)
     if errors:

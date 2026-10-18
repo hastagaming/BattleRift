@@ -23,7 +23,7 @@ var _checking: bool = false
 
 
 func _init() -> void:
-	title_text = "Settings"
+	title_text = Loc.t("settings.title")
 
 
 func _label(text: String, font_size: int, color: Color) -> Label:
@@ -60,9 +60,24 @@ func _build() -> void:
 	column.add_theme_constant_override("separation", 12)
 	scroll.add_child(column)
 	body.add_child(scroll)
+	_build_language_card(column)
 	_build_network_card(column)
 	_build_notification_card(column)
 	_build_tutorial_card(column)
+
+
+# ---- Language ----
+
+func _build_language_card(column: VBoxContainer) -> void:
+	var card := _card(column, Loc.t("settings.language_card"))
+	card.add_child(_label(String(Loc.language_info(Loc.current())["name"]), 24, UiTheme.TEXT))
+	card.add_child(_label(Loc.t("settings.language_hint"), 17, UiTheme.MUTED))
+	card.add_child(_button(Loc.t("settings.change_language"), _open_language_picker))
+
+
+func _open_language_picker() -> void:
+	Router.language_return = Router.SETTINGS
+	Router.go(Router.LANGUAGE)
 
 
 # ---- Match server ----

@@ -40,6 +40,8 @@ jobs:
         run: |
           python3 tools/android/check_config.py
           python3 -m unittest discover -s tools/android -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/i18n -p 'test_*.py' -v
+          python3 tools/i18n/check_packs.py
 
       - name: Build only the ${{ matrix.abi }} architecture
         run: python3 tools/android/select_abi.py "$ABI" --preset export_presets.cfg

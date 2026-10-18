@@ -5,8 +5,10 @@ var _bar: ProgressBar
 
 
 func _ready() -> void:
+	Loc.initialize()
 	UiTheme.ensure(get_tree())
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    Loc.apply_to(self)
 	var background := ColorRect.new()
 	background.color = UiTheme.BG
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -51,25 +53,30 @@ func _scenes_exist() -> bool:
 
 
 func _run() -> void:
+	if Loc.needs_first_choice():
+		Router.language_return = Router.BOOT
+		Router.go(Router.LANGUAGE)
+		return
 	var checks: Array[Dictionary] = [
-		{"label": "Validating game rules", "ok": not GameConfig.ALLOW_BOTS, "error": "Bots are not allowed in BattleRift"},
-		{"label": "Checking scenes", "ok": _scenes_exist(), "error": "Required scenes are missing"},
-		{"label": "Preparing input", "ok": InputMap.has_action("move_left") and InputMap.has_action("jump"), "error": "Input map was not registered"},
+		{"label": "boot.checking_rules", "ok": not GameConfig.ALLOW_BOTS, "error": "boot.error_bots"},
+		{"label": "boot.checking_scenes", "ok": _scenes_exist(), "error": "boot.error_scenes"},
+		{"label": "boot.preparing_input", "ok": InputMap.has_action("move_left") and InputMap.has_action("jump"), "error": "boot.error_input"},
 	]
 	var done := 0
 	for check in checks:
-		_status.text = String(check["label"])
+		_status.text = Loc.t(String(check["error"]))
 		await get_tree().process_frame
 		if not bool(check["ok"]):
-			_status.text = String(check["error"])
+			_status.text = Loc.t(String(check["error"]))
 			_status.add_theme_color_override("font_color", UiTheme.DANGER)
 			return
 		done += 1
 		_bar.value = float(done) / float(checks.size())
 		await get_tree().process_frame
-	_status.text = "Restoring session"
+	_status.text = Loc.t("boot.restoring_session")
 	var restored: bool = await AuthService.restore_session()
 	if restored:
+		LanguageSync.apply_account()
 		Router.go(TutorialStore.landing_scene())
 	else:
 		Router.go(Router.AUTH)
