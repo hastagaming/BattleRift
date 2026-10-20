@@ -128,9 +128,7 @@ func notify(message: String, is_error: bool = false) -> void:
 
 
 func friendly_error(message: String) -> String:
-	if message.is_empty():
-		return "Something went wrong"
-	return (message.substr(0, 1).to_upper() + message.substr(1)).replace(" cr", " CR").replace(" br", " BR")
+	return Loc.error_text(message)
 
 
 func clear_children(node: Node) -> void:

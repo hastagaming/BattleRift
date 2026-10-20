@@ -38,6 +38,7 @@ func _initialize() -> void:
 	player_data.grant_item("pet", "pet_volt")
 	player_data.grant_item("pet", "pet_catty")
 	var screen: Control = (load("res://scenes/customize/customize.tscn") as PackedScene).instantiate()
+	Loc.set_language("en", false)
 	root.add_child(screen)
 	await process_frame
 	screen._on_slot("pet")
@@ -55,5 +56,26 @@ func _initialize() -> void:
 	for emote_name in ["Wave", "Attack!", "Follow Me", "Watch Out!", "Hello Mate"]:
 		_check(_contains(texts, emote_name), "the emote list has %s" % emote_name)
 	screen.queue_free()
+	await process_frame
+	for code in ["ja", "de"]:
+		Loc.set_language(code, false)
+		var translated: Control = (load("res://scenes/customize/customize.tscn") as PackedScene).instantiate()
+		root.add_child(translated)
+		await process_frame
+		translated._on_slot("pet")
+		await process_frame
+		var words := _labels(translated, [])
+		if code == "ja":
+			_check(_contains(words, "ペット  2 / 10 収集") and _contains(words, "静電バースト") and _contains(words, "クールダウン 12秒") and _contains(words, "ロック中"), "the pet collection is readable in Japanese")
+			_check(_contains(words, "[ショップで入手]") and _contains(words, "[選択]"), "pet buttons are in Japanese")
+		else:
+			_check(_contains(words, "HAUSTIERE  2 / 10 gesammelt") and _contains(words, "Statischer Stoß") and _contains(words, "Abklingzeit 12 s"), "the pet collection is readable in German")
+			translated._on_slot("emote")
+			await process_frame
+			var emote_words := _labels(translated, [])
+			_check(_contains(emote_words, "Angriff!") and _contains(emote_words, "Folge mir") and _contains(emote_words, "Pass auf!"), "the emote names are in German")
+		translated.queue_free()
+		await process_frame
+	Loc.set_language("en", false)
 	print("Finished with %d failure(s)" % _failures)
 	quit(1 if _failures > 0 else 0)

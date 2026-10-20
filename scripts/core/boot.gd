@@ -8,7 +8,7 @@ func _ready() -> void:
 	Loc.initialize()
 	UiTheme.ensure(get_tree())
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    Loc.apply_to(self)
+	Loc.apply_to(self)
 	var background := ColorRect.new()
 	background.color = UiTheme.BG
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

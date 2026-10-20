@@ -7,7 +7,7 @@ var _queued: bool = false
 
 
 func _init() -> void:
-	title_text = "Customize"
+	title_text = Loc.t("customize.title")
 
 
 func _build() -> void:
@@ -27,7 +27,7 @@ func _build() -> void:
 	split.add_child(right)
 	var entries: Array = []
 	for slot in ItemDb.SLOT_ORDER:
-		entries.append([slot, String(ItemDb.SLOT_LABELS[slot])])
+		entries.append([slot, ItemDb.slot_label(slot)])
 	right.add_child(make_tabs(entries, _slot, _on_slot))
 	var scroll := make_list_scroll()
 	_list = VBoxContainer.new()
@@ -36,7 +36,7 @@ func _build() -> void:
 	scroll.add_child(_list)
 	right.add_child(scroll)
 	var emote_button := Button.new()
-	emote_button.text = "Play Emote"
+	emote_button.text = Loc.t("customize.play_emote")
 	emote_button.custom_minimum_size = Vector2(0.0, 52.0)
 	emote_button.pressed.connect(_preview.play_emote)
 	right.add_child(emote_button)
@@ -84,7 +84,7 @@ func _render() -> void:
 			if emote_id in owned or emote_id in CharacterModel.STARTER_EMOTES:
 				choices.append(emote_id)
 	if choices.is_empty():
-		_list.add_child(empty_note("Nothing to equip in this slot yet.", "Open Shop", Router.SHOP))
+		_list.add_child(empty_note(Loc.t("customize.nothing"), Loc.t("customize.open_shop"), Router.SHOP))
 		return
 	if _slot not in PlayerData.REQUIRED_SLOTS:
 		_list.add_child(_make_choice("", equipped_id.is_empty()))
@@ -95,7 +95,7 @@ func _render() -> void:
 func _render_pets(owned: Array, equipped_id: String) -> void:
 	var progress := PetLogic.collection_progress(owned)
 	var heading := Label.new()
-	heading.text = "PETS  %d / %d collected" % [int(progress["owned"]), int(progress["total"])]
+	heading.text = Loc.t("customize.pets_collected", {"owned": int(progress["owned"]), "total": int(progress["total"])})
 	heading.add_theme_font_size_override("font_size", 22)
 	heading.add_theme_color_override("font_color", UiTheme.ACCENT)
 	_list.add_child(heading)
@@ -131,12 +131,12 @@ func _pet_card(pet_id: String, is_owned: bool, is_equipped: bool) -> PanelContai
 	title_row.add_child(title)
 	title_row.add_child(UiTheme.chip(PetLogic.kind_label(pet), color))
 	if is_equipped:
-		title_row.add_child(UiTheme.chip("EQUIPPED", UiTheme.ACCENT))
+		title_row.add_child(UiTheme.chip(Loc.t("customize.equipped_tag"), UiTheme.ACCENT))
 	if not is_owned:
-		title_row.add_child(UiTheme.chip("LOCKED", UiTheme.DANGER))
+		title_row.add_child(UiTheme.chip(Loc.t("customize.locked"), UiTheme.DANGER))
 	text.add_child(title_row)
 	var ability := Label.new()
-	ability.text = "%s: %s" % [String(pet["ability_name"]), String(pet["desc"])]
+	ability.text = "%s: %s" % [PetLogic.ability_name(pet_id), PetLogic.description(pet_id)]
 	ability.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	ability.add_theme_font_size_override("font_size", 17)
 	ability.add_theme_color_override("font_color", UiTheme.MUTED)
@@ -152,11 +152,11 @@ func _pet_card(pet_id: String, is_owned: bool, is_equipped: bool) -> PanelContai
 	button.custom_minimum_size = Vector2(150.0, 52.0)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if is_owned:
-		button.text = "Selected" if is_equipped else "Select"
+		button.text = Loc.t("customize.selected") if is_equipped else Loc.t("customize.select")
 		button.disabled = is_equipped
 		button.pressed.connect(_on_pick.bind(pet_id))
 	else:
-		button.text = "Get in Shop"
+		button.text = Loc.t("customize.get_in_shop")
 		button.pressed.connect(Router.go.bind(Router.SHOP))
 	row.add_child(button)
 	if not is_owned:
@@ -167,23 +167,23 @@ func _pet_card(pet_id: String, is_owned: bool, is_equipped: bool) -> PanelContai
 func _make_choice(item_id: String, selected: bool) -> PanelContainer:
 	var button := Button.new()
 	button.custom_minimum_size = Vector2(150.0, 52.0)
-	button.text = "Selected" if selected else "Select"
+	button.text = Loc.t("customize.selected") if selected else Loc.t("customize.select")
 	button.disabled = selected
 	button.pressed.connect(_on_pick.bind(item_id))
 	if item_id.is_empty():
-		return build_row("None", "Leave this slot empty", UiTheme.MUTED, button)
-	var desc := String(ItemDb.info(item_id).get("desc", ""))
+		return build_row(Loc.t("customize.none"), Loc.t("customize.none_desc"), UiTheme.MUTED, button)
+	var desc := ItemDb.description(item_id)
 	return build_row(ItemDb.display_name(item_id), desc, ItemDb.color_of(item_id), button)
 
 
 func _on_pick(item_id: String) -> void:
 	if item_id.is_empty():
 		if PlayerData.unequip(_slot):
-			notify("Slot cleared")
+			notify(Loc.t("customize.slot_cleared"))
 		else:
-			notify("This slot cannot be empty", true)
+			notify(Loc.t("customize.slot_required"), true)
 		return
 	if PlayerData.equip(_slot, item_id):
-		notify("Equipped %s" % ItemDb.display_name(item_id))
+		notify(Loc.t("customize.equipped", {"item": ItemDb.display_name(item_id)}))
 	else:
-		notify("Could not equip this item", true)
+		notify(Loc.t("customize.equip_failed"), true)

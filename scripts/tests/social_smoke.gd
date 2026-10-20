@@ -39,6 +39,7 @@ func _initialize() -> void:
 	player_data.remote = true
 	player_data.data = {"account": {"account_id": "me", "display_name": "Me"}, "currencies": {"cr": 0, "br": 0}}
 	var screen: Control = (load("res://scenes/social/social.tscn") as PackedScene).instantiate()
+	Loc.set_language("en", false)
 	# Hold the poll so the first-reply state can be observed without a race against the network.
 	party_service._polling = true
 	root.add_child(screen)
@@ -86,5 +87,24 @@ func _initialize() -> void:
 	_check(_contains(texts, "Connection problem. Showing the last known party."), "a later failed poll keeps the party and shows a warning")
 
 	screen.queue_free()
+	await process_frame
+	# The same party, read in other languages.
+	party_service.last_error = ""
+	party_service.state_changed.emit(party_service.state)
+	for code in ["id", "ja"]:
+		Loc.set_language(code, false)
+		var translated: Control = (load("res://scenes/social/social.tscn") as PackedScene).instantiate()
+		root.add_child(translated)
+		await process_frame
+		var words := _labels(translated, [])
+		if code == "id":
+			_check(_contains(words, "Siap  1 / 2") and _contains(words, "PEMIMPIN") and _contains(words, "Menunggu 1 anggota untuk siap."), "the party screen is readable in Indonesian")
+			_check(_contains(words, "Zed mengundangmu") and _contains(words, "[Keluarkan]"), "invites and member actions are in Indonesian")
+		else:
+			_check(_contains(words, "準備完了  1 / 2") and _contains(words, "リーダー") and _contains(words, "1 人の準備を待っています。"), "the party screen is readable in Japanese")
+			_check(_contains(words, "[フレンド]") and _contains(words, "[外す]"), "tabs and member actions are in Japanese")
+		translated.queue_free()
+		await process_frame
+	Loc.set_language("en", false)
 	print("Finished with %d failure(s)" % _failures)
 	quit(1 if _failures > 0 else 0)

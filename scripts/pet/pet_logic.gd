@@ -2,31 +2,33 @@ class_name PetLogic
 extends RefCounted
 
 # Pure helpers for the pet collection screen. No nodes, so they can be tested headless.
-
-const KIND_LABELS := {
-	"area": "BURST",
-	"slow": "CHILL",
-	"guard": "GUARD",
-	"dash": "DASH",
-	"barrier": "WALL",
-	"passive": "PASSIVE",
-}
+# Every text comes from the language packs. The English text in PetDb is the fallback.
 
 
 static func kind_label(pet: Dictionary) -> String:
-	return String(KIND_LABELS.get(String(pet.get("kind", "")), "PET"))
+	var kind := String(pet.get("kind", ""))
+	return Loc.t_or("pet.kind.%s" % kind, Loc.t("pet.kind.generic"))
+
+
+# The name of the ability in the language of the player.
+static func ability_name(pet_id: String) -> String:
+	var pet := PetDb.get_pet(pet_id)
+	return Loc.t_or("pet.%s.ability" % pet_id, String(pet.get("ability_name", "")))
+
+
+static func description(pet_id: String) -> String:
+	var pet := PetDb.get_pet(pet_id)
+	return Loc.t_or("pet.%s.desc" % pet_id, String(pet.get("desc", "")))
 
 
 static func _seconds(value: float) -> String:
-	if is_equal_approx(value, roundf(value)):
-		return "%ds" % int(value)
-	return "%.1fs" % value
+	var shown := Loc.format_number(value, 0 if is_equal_approx(value, roundf(value)) else 1)
+	return Loc.t("unit.seconds", {"value": shown})
 
 
 static func _meters(value: float) -> String:
-	if is_equal_approx(value, roundf(value)):
-		return "%dm" % int(value)
-	return "%.1fm" % value
+	var shown := Loc.format_number(value, 0 if is_equal_approx(value, roundf(value)) else 1)
+	return Loc.t("unit.meters", {"value": shown})
 
 
 static func _percent_change(multiplier: float) -> String:
@@ -34,16 +36,20 @@ static func _percent_change(multiplier: float) -> String:
 	return "%+d%%" % change
 
 
+static func _number(value: float) -> String:
+	return Loc.format_number(roundf(value), 0)
+
+
 static func passive_lines(passive: Dictionary) -> Array[String]:
 	var lines: Array[String] = []
 	if passive.has("air_accel"):
-		lines.append("%s air control" % _percent_change(float(passive["air_accel"])))
+		lines.append(Loc.t("pet.passive.air_control", {"change": _percent_change(float(passive["air_accel"]))}))
 	if passive.has("fall_gravity"):
-		lines.append("%s fall gravity" % _percent_change(float(passive["fall_gravity"])))
+		lines.append(Loc.t("pet.passive.fall_gravity", {"change": _percent_change(float(passive["fall_gravity"]))}))
 	if passive.has("ragdoll_time"):
-		lines.append("%s knocked down time" % _percent_change(float(passive["ragdoll_time"])))
+		lines.append(Loc.t("pet.passive.knocked_down_time", {"change": _percent_change(float(passive["ragdoll_time"]))}))
 	if passive.has("hitstun"):
-		lines.append("%s hit stun" % _percent_change(float(passive["hitstun"])))
+		lines.append(Loc.t("pet.passive.hit_stun", {"change": _percent_change(float(passive["hitstun"]))}))
 	return lines
 
 
@@ -55,26 +61,26 @@ static func stat_chips(pet: Dictionary) -> Array[String]:
 	if PetDb.is_passive(pet):
 		return passive_lines(pet.get("passive", {}))
 	if pet.has("cooldown"):
-		chips.append("Cooldown %s" % _seconds(float(pet["cooldown"])))
+		chips.append(Loc.t("pet.stat.cooldown", {"value": _seconds(float(pet["cooldown"]))}))
 	match String(pet.get("kind", "")):
 		PetDb.KIND_AREA:
-			chips.append("Radius %s" % _meters(float(pet.get("radius", 0.0))))
+			chips.append(Loc.t("pet.stat.radius", {"value": _meters(float(pet.get("radius", 0.0)))}))
 			if float(pet.get("damage", 0.0)) > 0.0:
-				chips.append("Damage %d" % int(roundf(float(pet["damage"]))))
-			chips.append("Knockback %d" % int(roundf(float(pet.get("knockback", 0.0)))))
+				chips.append(Loc.t("pet.stat.damage", {"value": _number(float(pet["damage"]))}))
+			chips.append(Loc.t("pet.stat.knockback", {"value": _number(float(pet.get("knockback", 0.0)))}))
 			if String(pet.get("mode", "")) == "inward":
-				chips.append("Pulls in")
+				chips.append(Loc.t("pet.stat.pulls_in"))
 		PetDb.KIND_SLOW:
-			chips.append("Radius %s" % _meters(float(pet.get("radius", 0.0))))
-			chips.append("Slows %d%% for %s" % [int(roundf((1.0 - float(pet.get("slow_factor", 1.0))) * 100.0)), _seconds(float(pet.get("duration", 0.0)))])
+			chips.append(Loc.t("pet.stat.radius", {"value": _meters(float(pet.get("radius", 0.0)))}))
+			chips.append(Loc.t("pet.stat.slows", {"percent": int(roundf((1.0 - float(pet.get("slow_factor", 1.0))) * 100.0)), "time": _seconds(float(pet.get("duration", 0.0)))}))
 		PetDb.KIND_GUARD:
-			chips.append("Guard %s" % _seconds(float(pet.get("duration", 0.0))))
+			chips.append(Loc.t("pet.stat.guard", {"value": _seconds(float(pet.get("duration", 0.0)))}))
 		PetDb.KIND_DASH:
-			chips.append("Dash %s" % _seconds(float(pet.get("duration", 0.0))))
-			chips.append("Immune %s" % _seconds(float(pet.get("immune", 0.0))))
+			chips.append(Loc.t("pet.stat.dash", {"value": _seconds(float(pet.get("duration", 0.0)))}))
+			chips.append(Loc.t("pet.stat.immune", {"value": _seconds(float(pet.get("immune", 0.0)))}))
 		PetDb.KIND_BARRIER:
-			chips.append("Wall %s" % _seconds(float(pet.get("duration", 0.0))))
-			chips.append("Width %s" % _meters(float(pet.get("width", 0.0))))
+			chips.append(Loc.t("pet.stat.wall", {"value": _seconds(float(pet.get("duration", 0.0)))}))
+			chips.append(Loc.t("pet.stat.width", {"value": _meters(float(pet.get("width", 0.0)))}))
 	return chips
 
 

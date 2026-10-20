@@ -16,7 +16,7 @@ var _timer: Timer
 
 
 func _init() -> void:
-	title_text = "Social"
+	title_text = Loc.t("social.title")
 
 
 func _button(text: String, callback: Callable) -> Button:
@@ -53,9 +53,9 @@ func _chip(text: String, color: Color) -> PanelContainer:
 
 func _tag_color(tag: String) -> Color:
 	match tag:
-		"LEADER":
+		"leader":
 			return UiTheme.GOLD
-		"YOU", "READY":
+		"you", "ready":
 			return UiTheme.ACCENT
 	return UiTheme.MUTED
 
@@ -110,7 +110,7 @@ func _person_card(display_name: String, subtitle: String, online: bool, color: C
 	title.add_theme_color_override("font_color", color)
 	title_row.add_child(title)
 	for tag in tags:
-		title_row.add_child(_chip(String(tag), _tag_color(String(tag))))
+		title_row.add_child(_chip(Loc.t("party.tag_%s" % String(tag)), _tag_color(String(tag))))
 	text.add_child(title_row)
 	var status_row := HBoxContainer.new()
 	status_row.add_theme_constant_override("separation", 8)
@@ -156,7 +156,7 @@ func _error_block(message: String, retry: Callable) -> VBoxContainer:
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_color_override("font_color", UiTheme.DANGER)
 	box.add_child(label)
-	box.add_child(_button("Retry", retry))
+	box.add_child(_button(Loc.t("common.retry"), retry))
 	return box
 
 
@@ -164,18 +164,18 @@ func _update_tab_badges() -> void:
 	if _tab_buttons.is_empty():
 		return
 	var incoming: Array = _friends.get("incoming", [])
-	(_tab_buttons["party"] as Button).text = SocialLogic.badge_text("Party", PartyService.invites().size())
+	(_tab_buttons["party"] as Button).text = SocialLogic.badge_text(Loc.t("social.tab_party"), PartyService.invites().size())
 	(_tab_buttons["friends"] as Button).text = SocialLogic.badge_text("Friends", incoming.size())
 
 
 func _build() -> void:
 	if not PlayerData.remote:
-		body.add_child(empty_note("Party and friends need a server account. Sign in with Google, GitHub, or Facebook."))
+		body.add_child(empty_note(Loc.t("social.need_account")))
 		return
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 8)
 	var group := ButtonGroup.new()
-	for entry in [["party", "Party"], ["friends", "Friends"]]:
+	for entry in [["party", Loc.t("social.tab_party")], ["friends", Loc.t("social.tab_friends")]]:
 		var button := Button.new()
 		button.text = String(entry[1])
 		button.toggle_mode = true
@@ -267,34 +267,34 @@ func _member_of(user_id: String) -> Dictionary:
 func _render_party() -> void:
 	if not PartyService.loaded:
 		if PartyService.last_error.is_empty():
-			_content.add_child(_loading_note("Loading party..."))
+			_content.add_child(_loading_note(Loc.t("party.loading")))
 		else:
-			_content.add_child(_error_block("Could not load your party. %s" % friendly_error(PartyService.last_error), PartyService.refresh))
+			_content.add_child(_error_block(Loc.t("party.load_failed", {"reason": friendly_error(PartyService.last_error)}), PartyService.refresh))
 		return
 	if not PartyService.last_error.is_empty():
-		var warning := _loading_note("Connection problem. Showing the last known party.")
+		var warning := _loading_note(Loc.t("party.connection_problem"))
 		warning.add_theme_color_override("font_color", UiTheme.GOLD)
 		_content.add_child(warning)
 	for entry in PartyService.invites():
 		var invite: Dictionary = entry
 		var party_id := String(invite["party_id"])
 		var actions := _actions()
-		actions.add_child(_button("Accept", _run.bind(PartyService.accept.bind(party_id), "Joined the party")))
-		actions.add_child(_button("Decline", _run.bind(PartyService.decline.bind(party_id), "")))
-		_content.add_child(build_row("%s invited you" % String(invite["from_name"]), "Party invite", UiTheme.GOLD, actions))
+		actions.add_child(_button(Loc.t("common.accept"), _run.bind(PartyService.accept.bind(party_id), Loc.t("party.joined"))))
+		actions.add_child(_button(Loc.t("common.decline"), _run.bind(PartyService.decline.bind(party_id), "")))
+		_content.add_child(build_row(Loc.t("party.invite_from", {"name": String(invite["from_name"])}), Loc.t("party.invite_label"), UiTheme.GOLD, actions))
 	var party := PartyService.party()
 	if party.is_empty():
-		_content.add_child(empty_note("You are not in a party. Create one and invite your friends to queue together."))
-		_content.add_child(_button("Create Party", _run.bind(PartyService.create, "Party created")))
+		_content.add_child(empty_note(Loc.t("party.none")))
+		_content.add_child(_button(Loc.t("party.create"), _run.bind(PartyService.create, Loc.t("party.created"))))
 		return
 	var members: Array = party["members"]
 	var leader_id := String(party["leader_id"])
 	var am_leader := PartyService.is_leader()
-	_content.add_child(_section_heading("PARTY", "%d / %d" % [members.size(), int(party["max"])]))
+	_content.add_child(_section_heading(Loc.t("party.heading"), "%d / %d" % [members.size(), int(party["max"])]))
 	var progress := SocialLogic.ready_progress(members, leader_id)
 	if int(progress["total"]) > 0:
 		var ready_label := Label.new()
-		ready_label.text = "Ready  %d / %d" % [int(progress["ready"]), int(progress["total"])]
+		ready_label.text = Loc.t("party.ready_progress", {"ready": int(progress["ready"]), "total": int(progress["total"])})
 		ready_label.add_theme_font_size_override("font_size", 17)
 		ready_label.add_theme_color_override("font_color", UiTheme.MUTED)
 		_content.add_child(ready_label)
@@ -311,8 +311,8 @@ func _render_party() -> void:
 		var is_me := user_id == PartyService.my_id()
 		var actions := _actions()
 		if am_leader and not is_me:
-			actions.add_child(_button("Promote", _run.bind(PartyService.transfer.bind(user_id), "Leader changed")))
-			actions.add_child(_button("Kick", _run.bind(PartyService.kick.bind(user_id), "Player removed")))
+			actions.add_child(_button(Loc.t("party.promote"), _run.bind(PartyService.transfer.bind(user_id), Loc.t("party.leader_changed"))))
+			actions.add_child(_button(Loc.t("party.kick"), _run.bind(PartyService.kick.bind(user_id), Loc.t("party.player_removed"))))
 		var color := UiTheme.GOLD if is_me else UiTheme.TEXT
 		_content.add_child(_person_card(String(member["name"]), SocialLogic.member_subtitle(member), bool(member["online"]), color, SocialLogic.member_tags(member, is_leader, is_me), actions if actions.get_child_count() > 0 else null))
 	var invited: Array = party.get("invited", [])
@@ -321,23 +321,23 @@ func _render_party() -> void:
 		for entry in invited:
 			names.append(String((entry as Dictionary)["name"]))
 		var invited_label := Label.new()
-		invited_label.text = "Waiting for: %s" % ", ".join(names)
+		invited_label.text = Loc.t("party.waiting_for", {"names": ", ".join(names)})
 		invited_label.add_theme_color_override("font_color", UiTheme.MUTED)
 		_content.add_child(invited_label)
 	if not am_leader:
 		var me := _member_of(PartyService.my_id())
 		var is_ready := bool(me.get("ready", false))
-		_content.add_child(_button("Not Ready" if is_ready else "Ready", _run.bind(PartyService.set_ready.bind(not is_ready), "")))
+		_content.add_child(_button(Loc.t("party.not_ready") if is_ready else Loc.t("party.ready"), _run.bind(PartyService.set_ready.bind(not is_ready), "")))
 	else:
-		_content.add_child(_button("Invite Friends", _switch_tab.bind("friends")))
+		_content.add_child(_button(Loc.t("party.invite_friends"), _switch_tab.bind("friends")))
 		var hint_text := SocialLogic.ready_hint(members, leader_id)
 		if not hint_text.is_empty():
 			var hint := Label.new()
 			hint.text = hint_text
 			hint.add_theme_color_override("font_color", UiTheme.ACCENT if SocialLogic.all_ready(members, leader_id) else UiTheme.MUTED)
 			_content.add_child(hint)
-	_content.add_child(_button("Find Match", Router.go.bind(Router.PLAY)))
-	_content.add_child(_button("Leave Party", _run.bind(PartyService.leave, "Left the party")))
+	_content.add_child(_button(Loc.t("party.find_match"), Router.go.bind(Router.PLAY)))
+	_content.add_child(_button(Loc.t("party.leave"), _run.bind(PartyService.leave, Loc.t("party.left"))))
 
 
 func _friend_rpc(function_name: String, args: Dictionary = {}) -> Dictionary:
@@ -380,72 +380,72 @@ func _on_typed(text: String) -> void:
 func _on_add_pressed() -> void:
 	var code := _typed_code.strip_edges()
 	if code.is_empty():
-		notify("Enter a friend code first", true)
+		notify(Loc.t("friends.enter_code"), true)
 		return
 	_typed_code = ""
-	_run(_friend_rpc.bind("friend_add", {"p_code": code}), "Friend request sent")
+	_run(_friend_rpc.bind("friend_add", {"p_code": code}), Loc.t("friends.request_sent"))
 
 
 func _on_copy_pressed(code: String) -> void:
 	DisplayServer.clipboard_set(code)
-	notify("Friend code copied")
+	notify(Loc.t("friends.code_copied"))
 
 
 func _render_friends() -> void:
 	if not _friends_loaded:
 		if _friends_error.is_empty():
-			_content.add_child(_loading_note("Loading friends..."))
+			_content.add_child(_loading_note(Loc.t("friends.loading")))
 		else:
-			_content.add_child(_error_block("Could not load your friends. %s" % _friends_error, _retry_friends))
+			_content.add_child(_error_block(Loc.t("friends.load_failed", {"reason": _friends_error}), _retry_friends))
 		return
 	if not _friends_error.is_empty():
-		var warning := _loading_note("Connection problem. Showing the last known friends list.")
+		var warning := _loading_note(Loc.t("friends.connection_problem"))
 		warning.add_theme_color_override("font_color", UiTheme.GOLD)
 		_content.add_child(warning)
 	var code := String(_friends.get("code", ""))
 	var code_row := HBoxContainer.new()
 	code_row.add_theme_constant_override("separation", 12)
 	var code_label := Label.new()
-	code_label.text = "Your friend code: %s" % code
+	code_label.text = Loc.t("friends.code", {"code": code})
 	code_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	code_label.add_theme_font_size_override("font_size", 24)
 	code_label.add_theme_color_override("font_color", UiTheme.GOLD)
 	code_row.add_child(code_label)
-	code_row.add_child(_button("Copy", _on_copy_pressed.bind(code)))
+	code_row.add_child(_button(Loc.t("friends.copy"), _on_copy_pressed.bind(code)))
 	_content.add_child(code_row)
 	var add_row := HBoxContainer.new()
 	add_row.add_theme_constant_override("separation", 8)
 	var input := LineEdit.new()
-	input.placeholder_text = "FRIEND CODE"
+	input.placeholder_text = Loc.t("friends.code_placeholder")
 	input.max_length = 8
 	input.text = _typed_code
 	input.custom_minimum_size = Vector2(0.0, 48.0)
 	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	input.text_changed.connect(_on_typed)
 	add_row.add_child(input)
-	add_row.add_child(_button("Add Friend", _on_add_pressed))
+	add_row.add_child(_button(Loc.t("friends.add"), _on_add_pressed))
 	_content.add_child(add_row)
 	var incoming: Array = _friends.get("incoming", [])
 	for entry in incoming:
 		var request: Dictionary = entry
 		var user_id := String(request["user_id"])
 		var actions := _actions()
-		actions.add_child(_button("Accept", _run.bind(_friend_rpc.bind("friend_respond", {"p_user": user_id, "p_accept": true}), "Friend added")))
-		actions.add_child(_button("Decline", _run.bind(_friend_rpc.bind("friend_respond", {"p_user": user_id, "p_accept": false}), "")))
-		_content.add_child(build_row(String(request["name"]), "Friend request", UiTheme.GOLD, actions))
+		actions.add_child(_button(Loc.t("common.accept"), _run.bind(_friend_rpc.bind("friend_respond", {"p_user": user_id, "p_accept": true}), Loc.t("friends.added"))))
+		actions.add_child(_button(Loc.t("common.decline"), _run.bind(_friend_rpc.bind("friend_respond", {"p_user": user_id, "p_accept": false}), "")))
+		_content.add_child(build_row(String(request["name"]), Loc.t("friends.request"), UiTheme.GOLD, actions))
 	var friends: Array = _friends.get("friends", [])
-	_content.add_child(_section_heading("FRIENDS", "%d  |  %d online" % [friends.size(), SocialLogic.online_count(friends)]))
+	_content.add_child(_section_heading(Loc.t("friends.heading"), Loc.t("friends.summary", {"total": friends.size(), "online": SocialLogic.online_count(friends)})))
 	if friends.is_empty():
-		_content.add_child(empty_note("No friends yet. Share your code or add a friend by theirs."))
+		_content.add_child(empty_note(Loc.t("friends.empty")))
 	for entry in SocialLogic.sort_friends(friends):
 		var friend: Dictionary = entry
 		var user_id := String(friend["user_id"])
 		var online := bool(friend["online"])
 		var actions := _actions()
-		var invite_button := _button("Invite", _run.bind(_invite_friend.bind(user_id), "Invite sent"))
+		var invite_button := _button(Loc.t("friends.invite"), _run.bind(_invite_friend.bind(user_id), Loc.t("friends.invite_sent")))
 		invite_button.disabled = not SocialLogic.can_invite(friend)
 		actions.add_child(invite_button)
-		actions.add_child(_button("Remove", _run.bind(_friend_rpc.bind("friend_remove", {"p_user": user_id}), "Friend removed")))
+		actions.add_child(_button(Loc.t("friends.remove"), _run.bind(_friend_rpc.bind("friend_remove", {"p_user": user_id}), Loc.t("friends.removed"))))
 		_content.add_child(_person_card(String(friend["name"]), SocialLogic.friend_subtitle(friend), online, UiTheme.TEXT if online else UiTheme.MUTED, [], actions))
 	var outgoing: Array = _friends.get("outgoing", [])
 	if not outgoing.is_empty():
@@ -453,6 +453,6 @@ func _render_friends() -> void:
 		for entry in outgoing:
 			names.append(String((entry as Dictionary)["name"]))
 		var pending := Label.new()
-		pending.text = "Waiting for: %s" % ", ".join(names)
+		pending.text = Loc.t("party.waiting_for", {"names": ", ".join(names)})
 		pending.add_theme_color_override("font_color", UiTheme.MUTED)
 		_content.add_child(pending)

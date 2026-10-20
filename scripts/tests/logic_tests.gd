@@ -4,6 +4,8 @@ var _failures: int = 0
 
 
 func _initialize() -> void:
+    # The texts these tests check are English, whatever language the device saved.
+	Loc.set_language("en", false)
 	_test_waiting_for_humans()
 	_test_stock_last_team_wins()
 	_test_stock_timeout()
@@ -37,6 +39,7 @@ func _initialize() -> void:
 	_test_pack_validation()
 	_test_localization()
 	_test_shipped_languages()
+	_test_localized_content()
     _test_net_address()
 	_test_discovery_reply()
 	_test_enet_loopback()
@@ -426,8 +429,8 @@ func _test_social_logic() -> void:
 	_check(SocialLogic.ready_hint(members, "l") == "Waiting for 1 member to get ready.", "the ready hint names the number of members still waiting")
 	_check(SocialLogic.all_ready([{"user_id": "l", "ready": false}], "l"), "a solo party counts as ready")
 	_check(SocialLogic.ready_hint([{"user_id": "l"}], "l").is_empty(), "a solo party shows no ready hint")
-	_check(SocialLogic.member_tags({"ready": true}, false, true) == ["YOU", "READY"], "a ready member who is you gets the YOU and READY tags")
-	_check(SocialLogic.member_tags({}, true, false) == ["LEADER"], "the leader only gets the LEADER tag")
+	_check(SocialLogic.member_tags({"ready": true}, false, true) == ["you", "ready"], "a ready member who is you gets the you and ready tags")
+	_check(SocialLogic.member_tags({}, true, false) == ["leader"], "the leader only gets the leader tag")
 	_check(SocialLogic.member_subtitle({"level": 4, "online": true}) == "Lv 4  |  Online", "member subtitle shows level and presence")
 	var friends: Array = [
 		{"user_id": "1", "name": "Zoe", "online": false, "in_party": false, "level": 1},
@@ -756,7 +759,7 @@ func _test_shipped_languages() -> void:
 			var suffix := key.get_slice(".", key.get_slice_count(".") - 1)
 			if suffix in LocPlural.CATEGORIES:
 				continue
-			var shown := Loc.t(key, {"provider": "Google"})
+			var shown := Loc.t(key, {"provider": "x", "reason": "x", "name": "x", "names": "x", "ready": 1, "total": 2, "online": 1, "owned": 1, "code": "x", "level": 1, "status": "x", "item": "x", "value": "x", "percent": 1, "time": "x", "change": "x", "count": 1})
 			if shown == key or shown.contains("{"):
 				raw_key_visible = true
 			if shown.strip_edges().is_empty():
@@ -772,6 +775,46 @@ func _test_shipped_languages() -> void:
 	Loc.set_language("en", false)
 	_check(Loc.t("common.back") == "Back" and Loc.n("language.available_count", 5) == "5 languages available", "English texts are shown")
 	Loc.initialize(true)
+	Loc.set_language("en", false)
+
+
+func _test_localized_content() -> void:
+	Loc.initialize(true)
+	var waiting_members: Array = [{"user_id": "l", "ready": false}, {"user_id": "a", "ready": false}, {"user_id": "b", "ready": true}]
+	var one_waiting: Array = [{"user_id": "l", "ready": false}, {"user_id": "a", "ready": false}]
+	Loc.set_language("de", false)
+	_check(SocialLogic.ready_hint(one_waiting, "l") == "Warte auf 1 Mitglied, das bereit wird." and SocialLogic.ready_hint(waiting_members, "l") == "Warte auf 1 Mitglied, das bereit wird.", "the German ready hint says one member")
+	_check(SocialLogic.ready_hint([{"user_id": "l"}, {"user_id": "a"}, {"user_id": "b"}], "l") == "Warte auf 2 Mitglieder, die bereit werden.", "the German ready hint uses the plural")
+	Loc.set_language("ja", false)
+	_check(SocialLogic.ready_hint([{"user_id": "l"}, {"user_id": "a"}, {"user_id": "b"}], "l") == "2 人の準備を待っています。", "the Japanese ready hint needs no plural")
+	_check(SocialLogic.member_subtitle({"level": 4, "online": true}) == "Lv 4  |  オンライン", "the Japanese member line shows presence")
+	_check(Loc.t("friends.summary", {"total": 3, "online": 2}) == "3  |  オンライン 2", "the Japanese friend summary puts the number after the word")
+	var volt := PetDb.get_pet("pet_volt")
+	_check(PetLogic.stat_chips(volt) == ["クールダウン 12秒", "範囲 3.2m", "ダメージ 3", "ノックバック 4"], "Japanese pet facts use Japanese units")
+	_check(PetLogic.ability_name("pet_volt") == "静電バースト" and PetLogic.kind_label(volt) == "衝撃", "Japanese pet names and kinds are shown")
+	Loc.set_language("id", false)
+	_check(PetLogic.stat_chips(volt) == ["Jeda 12 dtk", "Radius 3,2 m", "Damage 3", "Dorongan 4"], "Indonesian pet facts use the decimal comma")
+	_check(PetLogic.description("pet_catty") == "Pasif. Kamu bangkit lebih cepat setelah terjatuh." and PetLogic.stat_chips(PetDb.get_pet("pet_catty")) == ["-40% waktu terjatuh", "-25% hit stun"], "Indonesian passive pets are described")
+	_check(ItemDb.description("pet_volt") == "Ledakan Statis: Menyengat pemain di dekat dengan ledakan listrik.", "an item description for a pet follows the language")
+	Loc.set_language("de", false)
+	_check(ItemDb.display_name("attack") == "Angriff!" and ItemDb.slot_label("weapon") == "Waffe", "German item names and slot labels are shown")
+	Loc.set_language("ms", false)
+	_check(ItemDb.description("hello_mate").contains("Hai, kawan"), "the Malay emote description names its spoken line")
+	Loc.set_language("ja", false)
+	var weapon_id := WeaponDb.ids()[0]
+	var english_weapon: String = String(WeaponDb.get_weapon(weapon_id)["name"])
+	_check(ItemDb.display_name(weapon_id) == english_weapon and ItemDb.display_name(weapon_id) != weapon_id, "an item without a translation keeps its English name, never a key")
+	_check(EmoteVoice.line_for("attack") == "攻撃！" and EmoteVoice.line_for("wave").is_empty(), "emotes speak in the language of the player")
+	Loc.set_language("id", false)
+	_check(Loc.error_text("only the party leader can invite") == "Hanya pemimpin party yang bisa mengundang", "a server message is translated")
+	_check(Loc.error_text("a brand new server message") == "A brand new server message", "a server message without a translation stays English")
+	_check(Loc.error_text("") == "Terjadi kesalahan", "an empty server message becomes a generic text")
+	_check(Loc.error_text("not enough cr") == "Not enough CR" and Loc.error_text("br and cr needed") == "BR and CR needed", "CR and BR keep their capitals in English fallbacks")
+	_check(Loc.error_text("a crash in the bridge") == "A crash in the bridge", "words that only contain cr or br are not changed")
+	_check(Loc.slug("Only the leader can kick!") == "only_the_leader_can_kick" and Loc.slug("  --Hi--  ") == "hi", "message slugs are built from letters and digits")
+	Loc.set_language("en", false)
+	_check(Loc.error_text("you are already friends") == "You are already friends" and EmoteVoice.line_for("attack") == "Attack!", "English server messages and spoken lines are unchanged")
+	_check(PetLogic.stat_chips(volt) == ["Cooldown 12s", "Radius 3.2m", "Damage 3", "Knockback 4"] and ItemDb.display_name("follow_me") == "Follow Me", "English pet facts and item names are unchanged")
 
 
 func _test_net_address() -> void:

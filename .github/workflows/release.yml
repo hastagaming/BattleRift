@@ -123,3 +123,10 @@ jobs:
           test "$(find dist -name "*.apk" | wc -l)" -eq 4
           gh release create "$TAG" dist/*.apk dist/*.sha256 \
             --repo "$GITHUB_REPOSITORY" --verify-tag --title "BattleRift $TAG" --generate-notes
+
+      - name: Publishing to itch.io Release
+        uses: josephbento/itchio-butler-action@v1.0.0
+        with:
+          butler_key: ${{ secrets.BUTLER_API_KEY }}
+          game: hastagaming/battlerift
+          package: dist/battlerift-release-${{ matrix.abi }}

@@ -180,5 +180,5 @@ func _render_equipped(data: Dictionary) -> void:
 	var grid := _grid()
 	for slot in ItemDb.SLOT_ORDER:
 		var item_id := String(equipped.get(slot, ""))
-		_pair(grid, String(ItemDb.SLOT_LABELS[slot]), "None" if item_id.is_empty() else ItemDb.display_name(item_id))
+		_pair(grid, ItemDb.slot_label(slot), "None" if item_id.is_empty() else ItemDb.display_name(item_id))
 	card.add_child(grid)

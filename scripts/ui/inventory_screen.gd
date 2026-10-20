@@ -73,7 +73,7 @@ func _make_row(item_id: String, slot: String) -> PanelContainer:
 	else:
 		button.text = "Equip"
 		button.pressed.connect(_on_equip.bind(slot, item_id))
-	var subtitle := String(ItemDb.SLOT_LABELS.get(slot, slot))
+	var subtitle := ItemDb.slot_label(slot)
 	if equipped:
 		subtitle += "  |  Equipped"
 	return build_row(ItemDb.display_name(item_id), subtitle, ItemDb.color_of(item_id), button)

@@ -254,6 +254,57 @@ static func _fill(text: String, args: Dictionary) -> String:
 	return result
 
 
+# True when the current language, or one it falls back to, defines this key.
+static func has_key(key: String) -> bool:
+	_ensure()
+	return not _lookup(key).is_empty()
+
+
+# The translation if some pack has it, otherwise the given text. Used for catalogs such as items and
+# pets, whose English names live in data and are translated one entry at a time.
+static func t_or(key: String, fallback: String, args: Dictionary = {}) -> String:
+	_ensure()
+	var text := _lookup(key)
+	if text.is_empty():
+		text = fallback
+	return _fill(text, args)
+
+
+# "Only the leader can kick" -> "only_the_leader_can_kick". Used to find the key of a server message.
+static func slug(text: String) -> String:
+	var result := ""
+	var last_was_separator := true
+	for character in text.to_lower():
+		var code := character.unicode_at(0)
+		if (code >= 97 and code <= 122) or (code >= 48 and code <= 57):
+			result += character
+			last_was_separator = false
+		elif not last_was_separator:
+			result += "_"
+			last_was_separator = true
+	return result.trim_suffix("_")
+
+
+# A message from the server, in the language of the player. Messages that have no translation yet
+# are shown in English with a capital letter, as before.
+static func error_text(message: String) -> String:
+	if message.strip_edges().is_empty():
+		return t("error.generic")
+	return t_or("error.%s" % slug(message), _capitalize_message(message))
+
+
+# English fallback for a server message: a capital first letter, and CR and BR (the currencies)
+# written in capitals. Only whole words change, so "brand" and "crash" stay as they are.
+static func _capitalize_message(message: String) -> String:
+	var words := message.split(" ")
+	for i in words.size():
+		var word := String(words[i])
+		if word == "cr" or word == "br":
+			words[i] = word.to_upper()
+	var text := " ".join(words)
+	return text.substr(0, 1).to_upper() + text.substr(1)
+
+
 static func t(key: String, args: Dictionary = {}) -> String:
 	_ensure()
 	var text := _lookup(key)

@@ -78,29 +78,34 @@ static func ready_hint(members: Array, leader_id: String) -> String:
 	if int(progress["total"]) == 0:
 		return ""
 	if waiting <= 0:
-		return "Everyone is ready."
-	return "Waiting for %d member%s to get ready." % [waiting, "" if waiting == 1 else "s"]
+		return Loc.t("party.everyone_ready")
+	return Loc.n("party.waiting_ready", waiting)
+
+
+static func presence_text(online: bool) -> String:
+	return Loc.t("status.online") if online else Loc.t("status.offline")
 
 
 static func member_subtitle(member: Dictionary) -> String:
-	return "Lv %d  |  %s" % [int(member.get("level", 1)), "Online" if bool(member.get("online", false)) else "Offline"]
+	return Loc.t("status.level_line", {"level": int(member.get("level", 1)), "status": presence_text(bool(member.get("online", false)))})
 
 
+# Tag ids, not texts. The screen turns each id into a text and a color: leader, you, ready, not_ready.
 static func member_tags(member: Dictionary, is_leader: bool, is_me: bool) -> Array[String]:
 	var tags: Array[String] = []
 	if is_leader:
-		tags.append("LEADER")
+		tags.append("leader")
 	if is_me:
-		tags.append("YOU")
+		tags.append("you")
 	if not is_leader:
-		tags.append("READY" if bool(member.get("ready", false)) else "NOT READY")
+		tags.append("ready" if bool(member.get("ready", false)) else "not_ready")
 	return tags
 
 
 static func friend_subtitle(friend: Dictionary) -> String:
-	var text := "Lv %d  |  %s" % [int(friend.get("level", 1)), "Online" if bool(friend.get("online", false)) else "Offline"]
+	var text := Loc.t("status.level_line", {"level": int(friend.get("level", 1)), "status": presence_text(bool(friend.get("online", false)))})
 	if bool(friend.get("in_party", false)):
-		text += "  |  In a party"
+		text += "  |  %s" % Loc.t("status.in_party")
 	return text
 
 

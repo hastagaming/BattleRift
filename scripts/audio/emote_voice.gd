@@ -22,16 +22,32 @@ const RECORDING_FORMATS: Array[String] = ["ogg", "wav", "mp3"]
 const HEARING_DISTANCE := 25.0
 
 
+# The line in the language of the player. Emotes without a spoken line are silent.
 static func line_for(emote_id: String) -> String:
-	return String(LINES.get(emote_id, ""))
+	if not LINES.has(emote_id):
+		return ""
+	return Loc.t_or("emote.%s.say" % emote_id, String(LINES[emote_id]))
 
 
+# A recording for the current language comes first: res://audio/voice/<language>/<emote id>.ogg.
+# Then a recording for any language: res://audio/voice/<emote id>.ogg.
 static func recording_for(emote_id: String) -> AudioStream:
-	for format in RECORDING_FORMATS:
-		var path := "%s%s.%s" % [RECORDING_DIR, emote_id, format]
-		if ResourceLoader.exists(path):
-			return load(path) as AudioStream
+	var folders: Array[String] = ["%s%s/" % [RECORDING_DIR, Loc.current()], RECORDING_DIR]
+	for folder in folders:
+		for format in RECORDING_FORMATS:
+			var path := "%s%s.%s" % [folder, emote_id, format]
+			if ResourceLoader.exists(path):
+				return load(path) as AudioStream
 	return null
+
+
+# The phone voices for the current language. English is the last choice.
+static func voices_for_language() -> PackedStringArray:
+	var language := Loc.current().get_slice("-", 0)
+	var voices := DisplayServer.tts_get_voices_for_language(language)
+	if voices.is_empty() and language != "en":
+		voices = DisplayServer.tts_get_voices_for_language("en")
+	return voices
 
 
 static func _is_heard(source: Node3D) -> bool:
@@ -55,7 +71,7 @@ static func play(source: Node3D, emote_id: String) -> void:
 		player.finished.connect(player.queue_free)
 		player.play()
 		return
-	var voices := DisplayServer.tts_get_voices_for_language("en")
+	var voices := voices_for_language()
 	if voices.is_empty():
 		return
 	var delivery: Dictionary = DELIVERY[emote_id]

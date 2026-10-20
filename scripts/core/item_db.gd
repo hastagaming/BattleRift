@@ -115,7 +115,19 @@ static func display_name(item_id: String) -> String:
 	var data := info(item_id)
 	if data.is_empty():
 		return item_id.capitalize()
-	return String(data["name"])
+	return Loc.t_or("item.%s.name" % item_id, String(data["name"]))
+
+
+# The description in the language of the player. Items without a translation keep their English text.
+static func description(item_id: String) -> String:
+	if PetDb.has(item_id):
+		return "%s: %s" % [PetLogic.ability_name(item_id), PetLogic.description(item_id)]
+	var data := info(item_id)
+	return Loc.t_or("item.%s.desc" % item_id, String(data.get("desc", "")))
+
+
+static func slot_label(slot: String) -> String:
+	return Loc.t_or("slot.%s" % slot, String(SLOT_LABELS.get(slot, slot)))
 
 
 static func color_of(item_id: String) -> Color:

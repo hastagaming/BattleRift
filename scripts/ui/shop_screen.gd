@@ -113,7 +113,7 @@ func _make_item_row(item: Dictionary) -> PanelContainer:
 		button.disabled = _busy or not Economy.can_afford(currency, price)
 		button.add_theme_color_override("font_color", UiTheme.GOLD if currency == "cr" else UiTheme.ACCENT)
 		button.pressed.connect(_on_buy.bind(item))
-	var desc := String(ItemDb.info(item_id).get("desc", ""))
+	var desc := ItemDb.description(item_id)
 	var subtitle := desc if currency == "cr" else "%s  |  Premium" % desc
 	return build_row(ItemDb.display_name(item_id), subtitle, ItemDb.color_of(item_id), button)
 
